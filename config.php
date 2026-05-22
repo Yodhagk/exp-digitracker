@@ -1,14 +1,6 @@
 <?php
-$servername = "localhost";
-$username = "root";
-$password = "Citi123";
-
-// Create connection
-$conn = mysqli_connect($servername, $username, $password);
-
-// Check connection
+$conn = mysqli_connect("localhost", "root", "Citi123", "simple-lamp");
 if (!$conn) {
- die("Connection failed: " . mysqli_connect_error());
+    die("Database connection failed: " . mysqli_connect_error());
 }
-echo "Connected successfully";
-?>
+mysqli_set_charset($conn, "utf8mb4");
