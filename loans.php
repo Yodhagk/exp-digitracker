@@ -11,22 +11,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add') {
-        $name       = trim($_POST['name'] ?? '');
-        $lender     = trim($_POST['lender'] ?? '');
-        $principal  = (float)($_POST['principal_amount'] ?? 0);
-        $remaining  = (float)($_POST['remaining_amount'] ?? 0);
-        $monthly    = (float)($_POST['monthly_payment'] ?? 0);
-        $rate       = (float)($_POST['interest_rate'] ?? 0);
-        $start      = $_POST['start_date'] ?: null;
-        $due        = $_POST['due_date'] ?? '';
-        $status     = $_POST['status'] ?? 'active';
-        $notes      = trim($_POST['notes'] ?? '');
+        $name         = trim($_POST['name'] ?? '');
+        $lender       = trim($_POST['lender'] ?? '');
+        $principal    = (float)($_POST['principal_amount'] ?? 0);
+        $remaining    = (float)($_POST['remaining_amount'] ?? 0);
+        $monthly      = (float)($_POST['monthly_payment'] ?? 0);
+        $rate         = (float)($_POST['interest_rate'] ?? 0);
+        $start        = $_POST['start_date'] ?: null;
+        $due          = $_POST['due_date'] ?? '';
+        $status       = $_POST['status'] ?? 'active';
+        $notes        = trim($_POST['notes'] ?? '');
+        $payment_mode = $_POST['payment_mode'] ?? 'cash';
+        $card_last4   = ($payment_mode === 'card') ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4) : null;
 
         if ($name && $due) {
             $stmt = mysqli_prepare($conn,
-                'INSERT INTO loans (user_id,name,lender,principal_amount,remaining_amount,monthly_payment,interest_rate,start_date,due_date,status,notes)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-            mysqli_stmt_bind_param($stmt, 'issddddssss', $uid,$name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes);
+                'INSERT INTO loans (user_id,name,lender,principal_amount,remaining_amount,monthly_payment,interest_rate,start_date,due_date,status,notes,payment_mode,card_last4)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            mysqli_stmt_bind_param($stmt, 'issddddssssss',
+                $uid,$name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes,$payment_mode,$card_last4);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
             $msg = 'success:Loan added successfully.';
@@ -34,23 +37,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'edit') {
-        $id         = (int)($_POST['id'] ?? 0);
-        $name       = trim($_POST['name'] ?? '');
-        $lender     = trim($_POST['lender'] ?? '');
-        $principal  = (float)($_POST['principal_amount'] ?? 0);
-        $remaining  = (float)($_POST['remaining_amount'] ?? 0);
-        $monthly    = (float)($_POST['monthly_payment'] ?? 0);
-        $rate       = (float)($_POST['interest_rate'] ?? 0);
-        $start      = $_POST['start_date'] ?: null;
-        $due        = $_POST['due_date'] ?? '';
-        $status     = $_POST['status'] ?? 'active';
-        $notes      = trim($_POST['notes'] ?? '');
+        $id           = (int)($_POST['id'] ?? 0);
+        $name         = trim($_POST['name'] ?? '');
+        $lender       = trim($_POST['lender'] ?? '');
+        $principal    = (float)($_POST['principal_amount'] ?? 0);
+        $remaining    = (float)($_POST['remaining_amount'] ?? 0);
+        $monthly      = (float)($_POST['monthly_payment'] ?? 0);
+        $rate         = (float)($_POST['interest_rate'] ?? 0);
+        $start        = $_POST['start_date'] ?: null;
+        $due          = $_POST['due_date'] ?? '';
+        $status       = $_POST['status'] ?? 'active';
+        $notes        = trim($_POST['notes'] ?? '');
+        $payment_mode = $_POST['payment_mode'] ?? 'cash';
+        $card_last4   = ($payment_mode === 'card') ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4) : null;
 
         if ($id && $name && $due) {
             $stmt = mysqli_prepare($conn,
-                'UPDATE loans SET name=?,lender=?,principal_amount=?,remaining_amount=?,monthly_payment=?,interest_rate=?,start_date=?,due_date=?,status=?,notes=?
+                'UPDATE loans SET name=?,lender=?,principal_amount=?,remaining_amount=?,monthly_payment=?,interest_rate=?,start_date=?,due_date=?,status=?,notes=?,payment_mode=?,card_last4=?
                  WHERE id=? AND user_id=?');
-            mysqli_stmt_bind_param($stmt, 'ssddddssssii', $name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes,$id,$uid);
+            mysqli_stmt_bind_param($stmt, 'ssddddssssssii',
+                $name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes,$payment_mode,$card_last4,$id,$uid);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
             $msg = 'success:Loan updated.';
@@ -94,6 +100,15 @@ function loan_status_badge($s) {
     $map = ['active'=>'badge-active','paid'=>'badge-paid','overdue'=>'badge-overdue'];
     return '<span class="badge-status '.($map[$s]??'').'">'.$s.'</span>';
 }
+
+function payment_mode_badge($mode, $last4 = null) {
+    $icons  = ['cash'=>'fa-money-bill-wave','bank_transfer'=>'fa-building-columns','card'=>'fa-credit-card','upi'=>'fa-mobile-screen-button'];
+    $labels = ['cash'=>'Cash','bank_transfer'=>'Bank Transfer','card'=>'Card','upi'=>'UPI'];
+    $icon   = $icons[$mode] ?? 'fa-circle-question';
+    $label  = $labels[$mode] ?? ucfirst((string)$mode);
+    if ($mode === 'card' && $last4) $label .= ' ····'.$last4;
+    return '<span class="badge bg-light text-dark border" style="font-size:.73rem;white-space:nowrap;"><i class="fas '.$icon.' me-1"></i>'.$label.'</span>';
+}
 ?>
 
 <?php if ($msg): list($type,$text) = explode(':',$msg,2); ?>
@@ -107,7 +122,6 @@ function loan_status_badge($s) {
   <div class="card-header">
     <h6 class="card-title"><i class="fas fa-hand-holding-dollar me-2 text-primary"></i>Loans</h6>
     <div class="d-flex gap-2 flex-wrap align-items-center">
-      <!-- Filter tabs -->
       <div class="btn-group btn-group-sm">
         <?php foreach(['all','active','overdue','paid'] as $f): ?>
           <a href="?status=<?= $f ?>" class="btn btn-<?= $filter===$f?'primary':'outline-secondary' ?>"><?= ucfirst($f) ?></a>
@@ -124,8 +138,8 @@ function loan_status_badge($s) {
         <thead>
           <tr>
             <th>#</th><th>Loan Name</th><th>Lender</th>
-            <th>Principal</th><th>Remaining</th><th>Monthly EMI</th>
-            <th>Due Date</th><th>Status</th><th>Actions</th>
+            <th>Monthly EMI</th><th>Remaining</th>
+            <th>Due Date</th><th>Payment Mode</th><th>Status</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -133,54 +147,60 @@ function loan_status_badge($s) {
           <tr><td colspan="9" class="text-center py-4 text-muted">No loans found. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add your first loan.</a></td></tr>
           <?php else: ?>
           <?php foreach ($loans as $i => $l):
-            $days = (int)ceil((strtotime($l['due_date']) - time()) / 86400);
+            $days = $l['due_date'] ? (int)ceil((strtotime($l['due_date']) - time()) / 86400) : 0;
           ?>
           <tr>
             <td class="text-muted"><?= $i+1 ?></td>
             <td class="fw-semibold"><?= htmlspecialchars($l['name']) ?>
-              <?php if ($l['notes']): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(mb_strimwidth($l['notes'],0,40,'…')) ?></div><?php endif; ?>
+              <?php if ($l['notes']): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(strlen((string)$l['notes'])>40 ? substr((string)$l['notes'],0,40).'…' : (string)$l['notes']) ?></div><?php endif; ?>
             </td>
-            <td><?= htmlspecialchars($l['lender'] ?? '–') ?></td>
-            <td>₹<?= number_format($l['principal_amount'],0) ?></td>
-            <td class="fw-bold">₹<?= number_format($l['remaining_amount'],0) ?></td>
-            <td>₹<?= number_format($l['monthly_payment'],0) ?></td>
+            <td><?= htmlspecialchars((string)($l['lender'] ?? '–')) ?></td>
+            <td class="fw-bold">₹<?= number_format((float)($l['monthly_payment'] ?? 0),0) ?></td>
+            <td class="fw-bold text-primary">₹<?= number_format((float)($l['remaining_amount'] ?? 0),0) ?></td>
             <td>
-              <?= date('d M Y', strtotime($l['due_date'])) ?>
-              <?php if ($l['status'] !== 'paid'): ?>
+              <?= $l['due_date'] ? date('d M Y', strtotime($l['due_date'])) : '—' ?>
+              <?php if ($l['status'] !== 'paid' && $l['due_date']): ?>
                 <div style="font-size:.76rem;" class="text-<?= $days<0?'danger':($days<=7?'warning':'muted') ?>">
                   <?= $days<0?abs($days).' days overdue':($days===0?'Today':$days.' days') ?>
                 </div>
               <?php endif; ?>
             </td>
+            <td><?= payment_mode_badge((string)($l['payment_mode'] ?? 'cash'), $l['card_last4'] ?? null) ?></td>
             <td><?= loan_status_badge($l['status']) ?></td>
             <td>
-              <div class="d-flex gap-1">
+              <div class="d-flex gap-1 flex-wrap">
                 <?php if ($l['status'] !== 'paid'): ?>
-                <form method="POST" onsubmit="return confirm('Mark this loan as paid?')">
+                <form method="POST" onsubmit="return confirm('Mark this loan as paid?')" class="d-inline">
                   <input type="hidden" name="action" value="mark_paid">
                   <input type="hidden" name="id" value="<?= $l['id'] ?>">
-                  <button type="submit" class="btn-action pay" title="Mark Paid"><i class="fas fa-circle-check"></i></button>
+                  <button type="submit" class="btn btn-sm btn-success" title="Mark Paid">
+                    <i class="fas fa-circle-check me-1"></i>Paid
+                  </button>
                 </form>
                 <?php endif; ?>
-                <button class="btn-action edit" data-bs-toggle="modal" data-bs-target="#editModal"
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal"
                   data-id="<?= $l['id'] ?>"
                   data-name="<?= htmlspecialchars($l['name'],ENT_QUOTES) ?>"
-                  data-lender="<?= htmlspecialchars($l['lender']??'',ENT_QUOTES) ?>"
-                  data-principal="<?= $l['principal_amount'] ?>"
-                  data-remaining="<?= $l['remaining_amount'] ?>"
-                  data-monthly="<?= $l['monthly_payment'] ?>"
-                  data-rate="<?= $l['interest_rate'] ?>"
-                  data-start="<?= $l['start_date'] ?>"
-                  data-due="<?= $l['due_date'] ?>"
+                  data-lender="<?= htmlspecialchars((string)($l['lender']??''),ENT_QUOTES) ?>"
+                  data-principal="<?= (float)($l['principal_amount'] ?? 0) ?>"
+                  data-remaining="<?= (float)($l['remaining_amount'] ?? 0) ?>"
+                  data-monthly="<?= (float)($l['monthly_payment'] ?? 0) ?>"
+                  data-rate="<?= (float)($l['interest_rate'] ?? 0) ?>"
+                  data-start="<?= (string)($l['start_date'] ?? '') ?>"
+                  data-due="<?= (string)($l['due_date'] ?? '') ?>"
                   data-status="<?= $l['status'] ?>"
-                  data-notes="<?= htmlspecialchars($l['notes']??'',ENT_QUOTES) ?>"
+                  data-notes="<?= htmlspecialchars((string)($l['notes']??''),ENT_QUOTES) ?>"
+                  data-paymode="<?= htmlspecialchars((string)($l['payment_mode']??'cash'),ENT_QUOTES) ?>"
+                  data-last4="<?= htmlspecialchars((string)($l['card_last4']??''),ENT_QUOTES) ?>"
                   onclick="populateEdit(this)" title="Edit">
-                  <i class="fas fa-pen"></i>
+                  <i class="fas fa-pen me-1"></i>Edit
                 </button>
-                <form method="POST" onsubmit="return confirm('Delete this loan?')">
+                <form method="POST" onsubmit="return confirm('Delete this loan?')" class="d-inline">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="id" value="<?= $l['id'] ?>">
-                  <button type="submit" class="btn-action delete" title="Delete"><i class="fas fa-trash"></i></button>
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                    <i class="fas fa-trash me-1"></i>Del
+                  </button>
                 </form>
               </div>
             </td>
@@ -201,7 +221,7 @@ function loan_status_badge($s) {
         <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Loan</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form method="POST">
+      <form method="POST" id="addForm">
         <input type="hidden" name="action" value="add">
         <div class="modal-body">
           <div class="row g-3">
@@ -243,6 +263,19 @@ function loan_status_badge($s) {
                 <option value="active">Active</option>
                 <option value="paid">Paid</option>
               </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Payment Mode</label>
+              <select name="payment_mode" id="add_paymode" class="form-control" onchange="toggleCard('add')">
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="card">Card</option>
+                <option value="upi">UPI</option>
+              </select>
+            </div>
+            <div class="col-md-4" id="add_card_wrap" style="display:none;">
+              <label class="form-label">Last 4 Card Digits</label>
+              <input type="text" name="card_last4" id="add_card_last4" class="form-control" maxlength="4" pattern="\d{4}" placeholder="1234">
             </div>
             <div class="col-12">
               <label class="form-label">Notes</label>
@@ -312,6 +345,19 @@ function loan_status_badge($s) {
                 <option value="overdue">Overdue</option>
               </select>
             </div>
+            <div class="col-md-4">
+              <label class="form-label">Payment Mode</label>
+              <select name="payment_mode" id="edit_paymode" class="form-control" onchange="toggleCard('edit')">
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="card">Card</option>
+                <option value="upi">UPI</option>
+              </select>
+            </div>
+            <div class="col-md-4" id="edit_card_wrap" style="display:none;">
+              <label class="form-label">Last 4 Card Digits</label>
+              <input type="text" name="card_last4" id="edit_card_last4" class="form-control" maxlength="4" pattern="\d{4}" placeholder="1234">
+            </div>
             <div class="col-12">
               <label class="form-label">Notes</label>
               <textarea name="notes" id="edit_notes" class="form-control" rows="2"></textarea>
@@ -330,6 +376,12 @@ function loan_status_badge($s) {
 <?php
 $extra_js = <<<'JS'
 <script>
+function toggleCard(prefix) {
+  const sel = document.getElementById(prefix + '_paymode');
+  const wrap = document.getElementById(prefix + '_card_wrap');
+  wrap.style.display = sel.value === 'card' ? 'block' : 'none';
+  if (sel.value !== 'card') document.getElementById(prefix + '_card_last4').value = '';
+}
 function populateEdit(btn) {
   document.getElementById('edit_id').value        = btn.dataset.id;
   document.getElementById('edit_name').value      = btn.dataset.name;
@@ -342,7 +394,14 @@ function populateEdit(btn) {
   document.getElementById('edit_due').value       = btn.dataset.due;
   document.getElementById('edit_status').value    = btn.dataset.status;
   document.getElementById('edit_notes').value     = btn.dataset.notes;
+  document.getElementById('edit_paymode').value   = btn.dataset.paymode || 'cash';
+  document.getElementById('edit_card_last4').value = btn.dataset.last4 || '';
+  toggleCard('edit');
 }
+document.getElementById('addModal').addEventListener('show.bs.modal', function () {
+  document.getElementById('addForm').reset();
+  document.getElementById('add_card_wrap').style.display = 'none';
+});
 </script>
 JS;
 require_once 'includes/footer.php';

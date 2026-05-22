@@ -118,50 +118,54 @@ function exp_badge($s){
           <?php if (empty($rows)): ?>
           <tr><td colspan="8" class="text-center py-4 text-muted">No expenses found. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add one.</a></td></tr>
           <?php else: foreach($rows as $i=>$e):
-            $days = (int)ceil((strtotime($e['due_date']) - time()) / 86400); ?>
+            $days = $e['due_date'] ? (int)ceil((strtotime($e['due_date']) - time()) / 86400) : 0; ?>
           <tr>
             <td class="text-muted"><?= $i+1 ?></td>
-            <td class="fw-semibold"><?= htmlspecialchars($e['name']) ?>
-              <?php if($e['notes']): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(mb_strimwidth($e['notes'],0,40,'…')) ?></div><?php endif; ?>
+            <td class="fw-semibold"><?= htmlspecialchars((string)($e['name'] ?? '')) ?>
+              <?php if(!empty($e['notes'])): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(strlen((string)$e['notes'])>40 ? substr((string)$e['notes'],0,40).'…' : (string)$e['notes']) ?></div><?php endif; ?>
             </td>
-            <td><span class="badge bg-light text-dark border" style="font-size:.75rem;"><?= ucfirst($e['category']) ?></span></td>
-            <td class="fw-bold">₹<?= number_format($e['amount'],0) ?></td>
+            <td><span class="badge bg-light text-dark border" style="font-size:.75rem;"><?= htmlspecialchars(ucfirst((string)($e['category'] ?? 'general'))) ?></span></td>
+            <td class="fw-bold">₹<?= number_format((float)($e['amount'] ?? 0),0) ?></td>
             <td>
-              <?= date('d M Y',strtotime($e['due_date'])) ?>
-              <?php if($e['status']!=='paid'): ?>
+              <?= $e['due_date'] ? date('d M Y', strtotime($e['due_date'])) : '—' ?>
+              <?php if($e['status']!=='paid' && $e['due_date']): ?>
                 <div style="font-size:.76rem;" class="text-<?= $days<0?'danger':($days<=7?'warning':'muted') ?>">
                   <?= $days<0?abs($days).' days overdue':($days===0?'Today':$days.' days') ?>
                 </div>
               <?php endif; ?>
             </td>
-            <td><?= $e['is_recurring'] ? '<span class="badge-status badge-active"><i class="fas fa-rotate me-1"></i>'.ucfirst($e['recurrence']).'</span>' : '<span class="text-muted" style="font-size:.8rem;">One-time</span>' ?></td>
-            <td><?= exp_badge($e['status']) ?></td>
+            <td><?= $e['is_recurring'] ? '<span class="badge-status badge-active"><i class="fas fa-rotate me-1"></i>'.ucfirst((string)($e['recurrence']??'monthly')).'</span>' : '<span class="text-muted" style="font-size:.8rem;">One-time</span>' ?></td>
+            <td><?= exp_badge((string)($e['status'] ?? 'pending')) ?></td>
             <td>
-              <div class="d-flex gap-1">
+              <div class="d-flex gap-1 flex-wrap">
                 <?php if($e['status']!=='paid'): ?>
-                <form method="POST" onsubmit="return confirm('Mark as paid?')">
+                <form method="POST" onsubmit="return confirm('Mark as paid?')" class="d-inline">
                   <input type="hidden" name="action" value="mark_paid">
                   <input type="hidden" name="id" value="<?= $e['id'] ?>">
-                  <button type="submit" class="btn-action pay" title="Mark Paid"><i class="fas fa-circle-check"></i></button>
+                  <button type="submit" class="btn btn-sm btn-success" title="Mark Paid">
+                    <i class="fas fa-circle-check me-1"></i>Paid
+                  </button>
                 </form>
                 <?php endif; ?>
-                <button class="btn-action edit" data-bs-toggle="modal" data-bs-target="#editModal"
+                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal"
                   data-id="<?= $e['id'] ?>"
-                  data-name="<?= htmlspecialchars($e['name'],ENT_QUOTES) ?>"
-                  data-category="<?= $e['category'] ?>"
-                  data-amount="<?= $e['amount'] ?>"
-                  data-due="<?= $e['due_date'] ?>"
-                  data-recurring="<?= $e['is_recurring'] ?>"
-                  data-recurrence="<?= $e['recurrence'] ?>"
-                  data-status="<?= $e['status'] ?>"
-                  data-notes="<?= htmlspecialchars($e['notes']??'',ENT_QUOTES) ?>"
+                  data-name="<?= htmlspecialchars((string)($e['name']??''),ENT_QUOTES) ?>"
+                  data-category="<?= htmlspecialchars((string)($e['category']??'general'),ENT_QUOTES) ?>"
+                  data-amount="<?= (float)($e['amount'] ?? 0) ?>"
+                  data-due="<?= (string)($e['due_date'] ?? '') ?>"
+                  data-recurring="<?= (int)($e['is_recurring'] ?? 0) ?>"
+                  data-recurrence="<?= htmlspecialchars((string)($e['recurrence']??'monthly'),ENT_QUOTES) ?>"
+                  data-status="<?= htmlspecialchars((string)($e['status']??'pending'),ENT_QUOTES) ?>"
+                  data-notes="<?= htmlspecialchars((string)($e['notes']??''),ENT_QUOTES) ?>"
                   onclick="populateEdit(this)" title="Edit">
-                  <i class="fas fa-pen"></i>
+                  <i class="fas fa-pen me-1"></i>Edit
                 </button>
-                <form method="POST" onsubmit="return confirm('Delete this expense?')">
+                <form method="POST" onsubmit="return confirm('Delete this expense?')" class="d-inline">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="id" value="<?= $e['id'] ?>">
-                  <button type="submit" class="btn-action delete" title="Delete"><i class="fas fa-trash"></i></button>
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                    <i class="fas fa-trash me-1"></i>Del
+                  </button>
                 </form>
               </div>
             </td>
@@ -330,6 +334,10 @@ function populateEdit(btn) {
   toggleRecurrence('edit');
   if (cb.checked) document.getElementById('edit_recurrence').value = btn.dataset.recurrence;
 }
+document.getElementById('addModal').addEventListener('show.bs.modal', function () {
+  this.querySelector('form').reset();
+  document.getElementById('add_recurrence_wrap').style.display = 'none';
+});
 </script>
 JS;
 require_once 'includes/footer.php';

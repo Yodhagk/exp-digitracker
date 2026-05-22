@@ -49,6 +49,13 @@ $warr_list = [];
 $r = mysqli_query($conn, "SELECT product_name, brand, warranty_expiry FROM warranties WHERE user_id=$uid AND warranty_expiry >= '$today' ORDER BY warranty_expiry LIMIT 5");
 while ($row = mysqli_fetch_assoc($r)) $warr_list[] = $row;
 
+// ── Monthly expense chart data ────────────────────────────
+$chart_year = max(2000, min(2100, (int)($_GET['year'] ?? date('Y'))));
+$months_exp = array_fill(0, 12, 0);
+$r = mysqli_query($conn, "SELECT MONTH(due_date) m, COALESCE(SUM(amount),0) total FROM expenses WHERE user_id=$uid AND YEAR(due_date)=$chart_year GROUP BY MONTH(due_date)");
+while ($row = mysqli_fetch_assoc($r)) $months_exp[(int)$row['m'] - 1] = (float)$row['total'];
+$year_total = array_sum($months_exp);
+
 require_once 'includes/header.php';
 
 function days_until($date) {
@@ -203,4 +210,77 @@ function due_badge($days, $status='') {
   </div>
 </div>
 
-<?php require_once 'includes/footer.php'; ?>
+<!-- ── Monthly Expense Chart ── -->
+<div class="row g-3 mt-1">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h6 class="card-title"><i class="fas fa-chart-bar me-2 text-success"></i>Monthly Expenses — <?= $chart_year ?></h6>
+        <form method="GET" class="d-flex gap-2 align-items-center">
+          <select name="year" class="form-control form-control-sm" style="width:auto;" onchange="this.form.submit()">
+            <?php for ($y = date('Y') - 3; $y <= date('Y') + 1; $y++): ?>
+              <option value="<?= $y ?>" <?= $y === $chart_year ? 'selected' : '' ?>><?= $y ?></option>
+            <?php endfor; ?>
+          </select>
+          <span class="text-muted" style="font-size:.85rem;">Total: ₹<?= number_format($year_total, 0) ?></span>
+        </form>
+      </div>
+      <div class="card-body">
+        <canvas id="expenseChart" height="90"></canvas>
+        <?php if ($year_total == 0): ?>
+          <div class="text-center text-muted mt-3" style="font-size:.9rem;">No expense data for <?= $chart_year ?>.</div>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+</div>
+
+<?php
+$months_json = json_encode(array_values($months_exp));
+$extra_js = <<<JS
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function(){
+  const data = {$months_json};
+  const labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const ctx = document.getElementById('expenseChart');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Expenses (₹)',
+        data: data,
+        backgroundColor: 'rgba(59,130,246,.25)',
+        borderColor: '#3b82f6',
+        borderWidth: 2,
+        borderRadius: 6,
+        hoverBackgroundColor: 'rgba(59,130,246,.45)'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => '₹' + ctx.parsed.y.toLocaleString('en-IN')
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            callback: v => '₹' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v)
+          }
+        }
+      }
+    }
+  });
+})();
+</script>
+JS;
+require_once 'includes/footer.php';
+?>

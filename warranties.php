@@ -151,7 +151,7 @@ function war_badge($expiry, $today) {
           <tr>
             <td class="text-muted"><?= $i+1 ?></td>
             <td class="fw-semibold"><?= htmlspecialchars($w['product_name']) ?>
-              <?php if($w['notes']): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(mb_strimwidth($w['notes'],0,35,'…')) ?></div><?php endif; ?>
+              <?php if($w['notes']): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(strlen((string)$w['notes'])>35 ? substr((string)$w['notes'],0,35).'…' : (string)$w['notes']) ?></div><?php endif; ?>
             </td>
             <td><?= htmlspecialchars($w['brand']??'–') ?></td>
             <td class="text-muted"><?= htmlspecialchars($w['model_number']??'–') ?></td>
