@@ -1,0 +1,30 @@
+[Unit]
+Description=DigiTracker Personal Finance Application
+Documentation=file:///var/app/script/README.md
+After=network-online.target mysql.service apache2.service
+Wants=network-online.target
+Requires=mysql.service apache2.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+
+# Startup: verify services, create dirs, health check
+ExecStart=/var/app/script/startup.sh
+
+# Shutdown: drain sessions, flush logs, graceful stop
+ExecStop=/var/app/script/shutdown.sh
+
+# Periodic health probe every 5 minutes (written to journald)
+ExecReload=/var/app/script/healthcheck.sh --quiet --log
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=digitracker
+
+TimeoutStartSec=90
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

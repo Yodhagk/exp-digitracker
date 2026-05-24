@@ -27,6 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_bind_param($stmt,'issdsisss',$uid,$name,$category,$amount,$due_date,$recurring,$recurrence,$status,$notes);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
+            AppLogger::action("Expense added: '$name' category=$category amount=₹$amount due=$due_date");
             $msg = 'success:Expense added.';
         }
     }
@@ -49,18 +50,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mysqli_stmt_bind_param($stmt,'ssdssissii',$name,$category,$amount,$due_date,$recurring,$recurrence,$status,$notes,$id,$uid);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
+            AppLogger::action("Expense updated: id=$id '$name' amount=₹$amount status=$status");
             $msg = 'success:Expense updated.';
         }
     }
 
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
-        if ($id) { mysqli_query($conn,"DELETE FROM expenses WHERE id=$id AND user_id=$uid"); $msg='success:Expense deleted.'; }
+        if ($id) {
+            mysqli_query($conn,"DELETE FROM expenses WHERE id=$id AND user_id=$uid");
+            AppLogger::action("Expense deleted: id=$id");
+            $msg='success:Expense deleted.';
+        }
     }
 
     if ($action === 'mark_paid') {
         $id = (int)($_POST['id'] ?? 0);
-        if ($id) { mysqli_query($conn,"UPDATE expenses SET status='paid' WHERE id=$id AND user_id=$uid"); $msg='success:Marked as paid.'; }
+        if ($id) {
+            mysqli_query($conn,"UPDATE expenses SET status='paid' WHERE id=$id AND user_id=$uid");
+            AppLogger::action("Expense marked paid: id=$id");
+            $msg='success:Marked as paid.';
+        }
     }
 
     header('Location: expenses.php?msg='.urlencode($msg));

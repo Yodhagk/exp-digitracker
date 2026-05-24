@@ -32,6 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $uid,$name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes,$payment_mode,$card_last4);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
+            AppLogger::action("Loan added: '$name' lender=$lender remaining=₹$remaining mode=$payment_mode");
             $msg = 'success:Loan added successfully.';
         }
     }
@@ -59,6 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes,$payment_mode,$card_last4,$id,$uid);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
+            AppLogger::action("Loan updated: id=$id '$name' status=$status mode=$payment_mode");
             $msg = 'success:Loan updated.';
         }
     }
@@ -67,6 +69,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id) {
             mysqli_query($conn, "DELETE FROM loans WHERE id=$id AND user_id=$uid");
+            AppLogger::action("Loan deleted: id=$id");
             $msg = 'success:Loan deleted.';
         }
     }
@@ -75,6 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id) {
             mysqli_query($conn, "UPDATE loans SET status='paid' WHERE id=$id AND user_id=$uid");
+            AppLogger::action("Loan marked paid: id=$id");
             $msg = 'success:Loan marked as paid.';
         }
     }
