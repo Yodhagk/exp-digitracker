@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $remaining    = (float)($_POST['remaining_amount'] ?? 0);
         $monthly      = (float)($_POST['monthly_payment'] ?? 0);
         $rate         = (float)($_POST['interest_rate'] ?? 0);
-        $start        = $_POST['start_date'] ?: null;
+        $start        = (!empty($_POST['start_date'])) ? $_POST['start_date'] : null;
         $due          = $_POST['due_date'] ?? '';
         $status       = $_POST['status'] ?? 'active';
         $notes        = trim($_POST['notes'] ?? '');
@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $remaining    = (float)($_POST['remaining_amount'] ?? 0);
         $monthly      = (float)($_POST['monthly_payment'] ?? 0);
         $rate         = (float)($_POST['interest_rate'] ?? 0);
-        $start        = $_POST['start_date'] ?: null;
+        $start        = (!empty($_POST['start_date'])) ? $_POST['start_date'] : null;
         $due          = $_POST['due_date'] ?? '';
         $status       = $_POST['status'] ?? 'active';
         $notes        = trim($_POST['notes'] ?? '');

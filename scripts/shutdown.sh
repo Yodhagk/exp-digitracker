@@ -2,6 +2,11 @@
 # DigiTracker - Application Shutdown Script
 # Location: /var/app/script/shutdown.sh
 # Called by: systemd digitracker.service (ExecStop)
+#
+# NOTE: Apache2 and MySQL are managed by their own systemd units.
+#       This script handles ONLY app-level cleanup (session drain,
+#       log flush, snapshot). Systemd stops the other services
+#       automatically in the correct dependency order.
 
 LOG_DIR="/var/app/logs"
 LOG="${LOG_DIR}/service.log"
@@ -15,53 +20,30 @@ log() {
 
 log "========================================================="
 log "DigiTracker shutdown initiated on $(hostname)"
+log "Uptime: $(uptime -p 2>/dev/null || uptime)"
 
-# ── Log active PHP sessions ───────────────────────────────
-SESSION_COUNT=$(find /var/lib/php/sessions/ -name 'sess_*' 2>/dev/null | wc -l)
+# ── Count and drain active PHP sessions ───────────────────
+SESSION_DIR="/var/lib/php/sessions"
+SESSION_COUNT=$(find "$SESSION_DIR" -name 'sess_*' 2>/dev/null | wc -l)
 log "Active PHP sessions at shutdown: ${SESSION_COUNT}"
 
 if [[ $SESSION_COUNT -gt 0 ]]; then
-    log "Allowing 5s for active requests to drain..."
-    sleep 5
+    log "Allowing 3s for in-flight requests to complete..."
+    sleep 3
 fi
 
-# ── Graceful Apache shutdown ──────────────────────────────
-if systemctl is-active --quiet apache2; then
-    log "Stopping Apache2 gracefully (graceful-stop)..."
-    apachectl graceful-stop 2>/dev/null || true
-
-    # Wait up to 15s for graceful stop
-    for i in $(seq 1 15); do
-        sleep 1
-        if ! systemctl is-active --quiet apache2; then
-            log "Apache2: STOPPED (after ${i}s)"
-            break
-        fi
-        if [[ $i -eq 15 ]]; then
-            log "WARNING: Graceful stop timed out — forcing stop"
-            systemctl stop apache2
-            log "Apache2: FORCE STOPPED"
-        fi
-    done
-else
-    log "Apache2: already stopped"
-fi
-
-# ── MySQL graceful shutdown ───────────────────────────────
-if systemctl is-active --quiet mysql; then
-    log "Flushing MySQL binary logs..."
-    mysqladmin flush-logs 2>/dev/null || true
-    log "Stopping MySQL..."
-    systemctl stop mysql
-    log "MySQL: STOPPED"
-else
-    log "MySQL: already stopped"
+# ── Flush MySQL binary logs (while MySQL is still up) ─────
+if mysqladmin ping --silent 2>/dev/null; then
+    mysqladmin flush-logs 2>/dev/null && log "MySQL binary logs flushed" \
+        || log "WARNING: MySQL flush-logs failed (non-critical)"
 fi
 
 # ── Final resource snapshot ───────────────────────────────
-DISK_USE=$(df -h /var/www/html/digitracker 2>/dev/null | awk 'NR==2{print $5}' || echo "?")
-log "Disk usage at shutdown: ${DISK_USE}"
+MEM_FREE=$(free -m 2>/dev/null | awk '/Mem:/{print $4}')
+DISK_USE=$(df -h /var/www/html/digitracker 2>/dev/null | awk 'NR==2{print $5}')
+log "Final snapshot: mem_free=${MEM_FREE}MB disk_used=${DISK_USE}"
 
-log "DigiTracker shutdown COMPLETE"
+log "DigiTracker app-level shutdown COMPLETE"
+log "  (Apache2 + MySQL will be stopped by systemd in dependency order)"
 log "========================================================="
 exit 0
