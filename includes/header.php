@@ -47,6 +47,9 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <li class="<?= $current_page === 'warranties.php' ? 'active' : '' ?>">
       <a href="warranties.php"><i class="fas fa-shield-halved"></i><span>Warranties</span></a>
     </li>
+    <li class="<?= $current_page === 'reports.php' ? 'active' : '' ?>">
+      <a href="reports.php"><i class="fas fa-chart-bar"></i><span>Reports</span></a>
+    </li>
   </ul>
 </nav>
 

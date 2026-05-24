@@ -1,5 +1,5 @@
 <?php
-$conn = mysqli_connect("localhost", "root", "Citi123", "simple-lamp");
+$conn = mysqli_connect('localhost', 'digiuser', 'Digi@2026', 'digitracker');
 if (!$conn) {
     die("Database connection failed: " . mysqli_connect_error());
 }

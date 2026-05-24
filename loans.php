@@ -2,11 +2,53 @@
 require_once 'includes/auth.php';
 require_once 'config.php';
 $page_title = 'Loans';
-$uid = (int)$_SESSION['id'];
+$uid   = (int)$_SESSION['id'];
 $today = date('Y-m-d');
-$msg = '';
+$msg   = '';
 
-// ── Handle POST actions ─────────────────────────────────
+// ── EMI schedule generator ───────────────────────────────────
+function generate_emi_schedule(
+    $conn, int $loan_id, int $uid, string $name, float $monthly,
+    string $first_due, int $tenure_months, string $payment_mode, ?string $card_last4
+): int {
+    global $today;
+    // Remove only pending auto-generated entries — keep paid ones as history
+    mysqli_query($conn,
+        "DELETE FROM expenses WHERE loan_ref_id=$loan_id AND user_id=$uid
+         AND auto_generated=1 AND status='pending'");
+
+    $dt    = new DateTime($first_due);
+    $count = 0;
+    for ($i = 0; $i < $tenure_months; $i++) {
+        if ($i > 0) $dt->modify('+1 month');
+        $due_str = $dt->format('Y-m-d');
+        $status  = ($due_str < $today) ? 'paid' : 'pending';
+        $n       = $i + 1;
+        $label   = "EMI $n/$tenure_months";
+        $emi_nm  = "$name – $label";
+        $note    = "$label · auto-generated EMI";
+
+        $cat    = 'loan';
+        $is_rec = 0;
+        $recur  = 'monthly';
+        $auto_g = 1;
+        $stmt = mysqli_prepare($conn,
+            'INSERT INTO expenses
+                (user_id,name,category,amount,due_date,is_recurring,recurrence,status,
+                 notes,payment_mode,card_last4,loan_ref_id,auto_generated)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        mysqli_stmt_bind_param($stmt, 'issdsisssssii',
+            $uid, $emi_nm, $cat, $monthly, $due_str,
+            $is_rec, $recur, $status, $note, $payment_mode, $card_last4,
+            $loan_id, $auto_g);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
+        $count++;
+    }
+    return $count;
+}
+
+// ── Handle POST ──────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -22,18 +64,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status       = $_POST['status'] ?? 'active';
         $notes        = trim($_POST['notes'] ?? '');
         $payment_mode = $_POST['payment_mode'] ?? 'cash';
-        $card_last4   = ($payment_mode === 'card') ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4) : null;
+        $card_last4   = ($payment_mode === 'card')
+            ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4)
+            : null;
+        $tenure_val   = (int)($_POST['tenure_value'] ?? 0);
+        $tenure_unit  = $_POST['tenure_unit'] ?? 'months';
+        $tenure_months = $tenure_val > 0
+            ? ($tenure_unit === 'years' ? $tenure_val * 12 : $tenure_val)
+            : null;
 
         if ($name && $due) {
             $stmt = mysqli_prepare($conn,
-                'INSERT INTO loans (user_id,name,lender,principal_amount,remaining_amount,monthly_payment,interest_rate,start_date,due_date,status,notes,payment_mode,card_last4)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
-            mysqli_stmt_bind_param($stmt, 'issddddssssss',
-                $uid,$name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes,$payment_mode,$card_last4);
+                'INSERT INTO loans
+                    (user_id,name,lender,principal_amount,remaining_amount,monthly_payment,
+                     interest_rate,start_date,due_date,status,notes,payment_mode,card_last4,tenure_months)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            mysqli_stmt_bind_param($stmt, 'issddddssssssi',
+                $uid, $name, $lender, $principal, $remaining, $monthly, $rate,
+                $start, $due, $status, $notes, $payment_mode, $card_last4, $tenure_months);
             mysqli_stmt_execute($stmt);
+            $loan_id = (int)mysqli_insert_id($conn);
             mysqli_stmt_close($stmt);
-            AppLogger::action("Loan added: '$name' lender=$lender remaining=₹$remaining mode=$payment_mode");
-            $msg = 'success:Loan added successfully.';
+
+            $emi_count = 0;
+            if ($loan_id && $tenure_months && $monthly > 0 && $due) {
+                $emi_count = generate_emi_schedule(
+                    $conn, $loan_id, $uid, $name, $monthly,
+                    $due, $tenure_months, $payment_mode, $card_last4
+                );
+            }
+            AppLogger::action("Loan added: '$name' lender=$lender remaining=₹$remaining mode=$payment_mode tenure=$tenure_months");
+            $msg = $emi_count > 0
+                ? "success:Loan added. $emi_count EMI entries created in Expenses."
+                : 'success:Loan added successfully.';
         }
     }
 
@@ -50,24 +113,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status       = $_POST['status'] ?? 'active';
         $notes        = trim($_POST['notes'] ?? '');
         $payment_mode = $_POST['payment_mode'] ?? 'cash';
-        $card_last4   = ($payment_mode === 'card') ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4) : null;
+        $card_last4   = ($payment_mode === 'card')
+            ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4)
+            : null;
+        $tenure_val   = (int)($_POST['tenure_value'] ?? 0);
+        $tenure_unit  = $_POST['tenure_unit'] ?? 'months';
+        $tenure_months = $tenure_val > 0
+            ? ($tenure_unit === 'years' ? $tenure_val * 12 : $tenure_val)
+            : null;
+        $regen_emi = isset($_POST['regen_emi']);
 
         if ($id && $name && $due) {
             $stmt = mysqli_prepare($conn,
-                'UPDATE loans SET name=?,lender=?,principal_amount=?,remaining_amount=?,monthly_payment=?,interest_rate=?,start_date=?,due_date=?,status=?,notes=?,payment_mode=?,card_last4=?
+                'UPDATE loans
+                    SET name=?,lender=?,principal_amount=?,remaining_amount=?,monthly_payment=?,
+                        interest_rate=?,start_date=?,due_date=?,status=?,notes=?,payment_mode=?,
+                        card_last4=?,tenure_months=?
                  WHERE id=? AND user_id=?');
-            mysqli_stmt_bind_param($stmt, 'ssddddssssssii',
-                $name,$lender,$principal,$remaining,$monthly,$rate,$start,$due,$status,$notes,$payment_mode,$card_last4,$id,$uid);
+            mysqli_stmt_bind_param($stmt, 'ssddddsssssssii',
+                $name, $lender, $principal, $remaining, $monthly, $rate,
+                $start, $due, $status, $notes, $payment_mode, $card_last4, $tenure_months,
+                $id, $uid);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
-            AppLogger::action("Loan updated: id=$id '$name' status=$status mode=$payment_mode");
-            $msg = 'success:Loan updated.';
+
+            $emi_count = 0;
+            if ($regen_emi && $tenure_months && $monthly > 0 && $due) {
+                $emi_count = generate_emi_schedule(
+                    $conn, $id, $uid, $name, $monthly,
+                    $due, $tenure_months, $payment_mode, $card_last4
+                );
+            }
+            AppLogger::action("Loan updated: id=$id '$name' status=$status tenure=$tenure_months");
+            $msg = $emi_count > 0
+                ? "success:Loan updated. $emi_count EMI entries regenerated."
+                : 'success:Loan updated.';
         }
     }
 
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id) {
+            // Delete pending auto-generated EMI expenses first
+            mysqli_query($conn,
+                "DELETE FROM expenses WHERE loan_ref_id=$id AND user_id=$uid AND auto_generated=1 AND status='pending'");
             mysqli_query($conn, "DELETE FROM loans WHERE id=$id AND user_id=$uid");
             AppLogger::action("Loan deleted: id=$id");
             $msg = 'success:Loan deleted.';
@@ -78,6 +167,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id) {
             mysqli_query($conn, "UPDATE loans SET status='paid' WHERE id=$id AND user_id=$uid");
+            // Mark remaining EMI expenses as paid too
+            mysqli_query($conn,
+                "UPDATE expenses SET status='paid' WHERE loan_ref_id=$id AND user_id=$uid AND auto_generated=1");
             AppLogger::action("Loan marked paid: id=$id");
             $msg = 'success:Loan marked as paid.';
         }
@@ -90,34 +182,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $msg = $_GET['msg'] ?? '';
 
 // Auto-mark overdue
-mysqli_query($conn, "UPDATE loans SET status='overdue' WHERE user_id=$uid AND status='active' AND due_date < '$today'");
+mysqli_query($conn, "UPDATE loans SET status='overdue'
+    WHERE user_id=$uid AND status='active' AND due_date < '$today'");
 
-// ── Fetch loans ─────────────────────────────────────────
+// Fetch loans with EMI count
 $filter = $_GET['status'] ?? 'all';
-$where  = $filter !== 'all' ? "AND status='".mysqli_real_escape_string($conn,$filter)."'" : '';
-$result = mysqli_query($conn, "SELECT * FROM loans WHERE user_id=$uid $where ORDER BY due_date ASC");
-$loans  = mysqli_fetch_all($result, MYSQLI_ASSOC);
+$where  = $filter !== 'all'
+    ? "AND l.status='" . mysqli_real_escape_string($conn, $filter) . "'"
+    : '';
+$result = mysqli_query($conn,
+    "SELECT l.*,
+        (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1) AS emi_total,
+        (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1 AND e.status='paid') AS emi_paid
+     FROM loans l
+     WHERE l.user_id=$uid $where ORDER BY l.due_date ASC");
+$loans = mysqli_fetch_all($result, MYSQLI_ASSOC);
 
 require_once 'includes/header.php';
 
-function loan_status_badge($s) {
-    $map = ['active'=>'badge-active','paid'=>'badge-paid','overdue'=>'badge-overdue'];
-    return '<span class="badge-status '.($map[$s]??'').'">'.$s.'</span>';
+function loan_status_badge(string $s): string {
+    $map = ['active' => 'badge-active', 'paid' => 'badge-paid', 'overdue' => 'badge-overdue'];
+    return '<span class="badge-status ' . ($map[$s] ?? '') . '">' . $s . '</span>';
 }
 
-function payment_mode_badge($mode, $last4 = null) {
-    $icons  = ['cash'=>'fa-money-bill-wave','bank_transfer'=>'fa-building-columns','card'=>'fa-credit-card','upi'=>'fa-mobile-screen-button'];
-    $labels = ['cash'=>'Cash','bank_transfer'=>'Bank Transfer','card'=>'Card','upi'=>'UPI'];
-    $icon   = $icons[$mode] ?? 'fa-circle-question';
-    $label  = $labels[$mode] ?? ucfirst((string)$mode);
-    if ($mode === 'card' && $last4) $label .= ' ····'.$last4;
-    return '<span class="badge bg-light text-dark border" style="font-size:.73rem;white-space:nowrap;"><i class="fas '.$icon.' me-1"></i>'.$label.'</span>';
+function payment_mode_badge(string $mode, ?string $last4 = null): string {
+    $icons  = ['cash' => 'fa-money-bill-wave', 'bank_transfer' => 'fa-building-columns', 'card' => 'fa-credit-card', 'upi' => 'fa-mobile-screen-button'];
+    $labels = ['cash' => 'Cash', 'bank_transfer' => 'Bank Transfer', 'card' => 'Card', 'upi' => 'UPI'];
+    $icon   = $icons[$mode]  ?? 'fa-circle-question';
+    $label  = $labels[$mode] ?? ucfirst($mode);
+    if ($mode === 'card' && $last4) $label .= ' ····' . $last4;
+    return '<span class="badge bg-light text-dark border" style="font-size:.73rem;white-space:nowrap;">'
+         . '<i class="fas ' . $icon . ' me-1"></i>' . $label . '</span>';
+}
+
+function tenure_label(?int $months): string {
+    if (!$months) return '<span class="text-muted">—</span>';
+    if ($months % 12 === 0 && $months >= 12) {
+        $y = $months / 12;
+        return $y . ' yr' . ($y > 1 ? 's' : '') . ' <span class="text-muted" style="font-size:.75rem;">(' . $months . ' mo)</span>';
+    }
+    return $months . ' months';
 }
 ?>
 
-<?php if ($msg): list($type,$text) = explode(':',$msg,2); ?>
-<div class="alert alert-<?= $type==='success'?'success':'danger' ?> alert-dismissible fade show" role="alert">
-  <i class="fas fa-<?= $type==='success'?'circle-check':'circle-exclamation' ?> me-2"></i><?= htmlspecialchars($text) ?>
+<?php if ($msg): [$t, $text] = explode(':', $msg, 2); ?>
+<div class="alert alert-<?= $t === 'success' ? 'success' : 'danger' ?> alert-dismissible fade show" role="alert">
+  <i class="fas fa-<?= $t === 'success' ? 'circle-check' : 'circle-exclamation' ?> me-2"></i><?= htmlspecialchars($text) ?>
   <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 <?php endif; ?>
@@ -127,8 +237,8 @@ function payment_mode_badge($mode, $last4 = null) {
     <h6 class="card-title"><i class="fas fa-hand-holding-dollar me-2 text-primary"></i>Loans</h6>
     <div class="d-flex gap-2 flex-wrap align-items-center">
       <div class="btn-group btn-group-sm">
-        <?php foreach(['all','active','overdue','paid'] as $f): ?>
-          <a href="?status=<?= $f ?>" class="btn btn-<?= $filter===$f?'primary':'outline-secondary' ?>"><?= ucfirst($f) ?></a>
+        <?php foreach (['all', 'active', 'overdue', 'paid'] as $f): ?>
+          <a href="?status=<?= $f ?>" class="btn btn-<?= $filter === $f ? 'primary' : 'outline-secondary' ?>"><?= ucfirst($f) ?></a>
         <?php endforeach; ?>
       </div>
       <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
@@ -143,29 +253,55 @@ function payment_mode_badge($mode, $last4 = null) {
           <tr>
             <th>#</th><th>Loan Name</th><th>Lender</th>
             <th>Monthly EMI</th><th>Remaining</th>
-            <th>Due Date</th><th>Payment Mode</th><th>Status</th><th>Actions</th>
+            <th>Tenure</th><th>EMI Schedule</th>
+            <th>Due Date</th><th>Payment</th><th>Status</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
           <?php if (empty($loans)): ?>
-          <tr><td colspan="9" class="text-center py-4 text-muted">No loans found. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add your first loan.</a></td></tr>
+          <tr>
+            <td colspan="11" class="text-center py-4 text-muted">
+              No loans found. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add your first loan.</a>
+            </td>
+          </tr>
           <?php else: ?>
           <?php foreach ($loans as $i => $l):
             $days = $l['due_date'] ? (int)ceil((strtotime($l['due_date']) - time()) / 86400) : 0;
+            $emi_total = (int)$l['emi_total'];
+            $emi_paid  = (int)$l['emi_paid'];
+            $emi_left  = $emi_total - $emi_paid;
           ?>
           <tr>
-            <td class="text-muted"><?= $i+1 ?></td>
-            <td class="fw-semibold"><?= htmlspecialchars($l['name']) ?>
-              <?php if ($l['notes']): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(strlen((string)$l['notes'])>40 ? substr((string)$l['notes'],0,40).'…' : (string)$l['notes']) ?></div><?php endif; ?>
+            <td class="text-muted"><?= $i + 1 ?></td>
+            <td class="fw-semibold">
+              <?= htmlspecialchars($l['name']) ?>
+              <?php if ($l['notes']): ?>
+                <div class="text-muted" style="font-size:.78rem;">
+                  <?= htmlspecialchars(strlen((string)$l['notes']) > 40 ? substr((string)$l['notes'], 0, 40) . '…' : (string)$l['notes']) ?>
+                </div>
+              <?php endif; ?>
             </td>
             <td><?= htmlspecialchars((string)($l['lender'] ?? '–')) ?></td>
-            <td class="fw-bold">₹<?= number_format((float)($l['monthly_payment'] ?? 0),0) ?></td>
-            <td class="fw-bold text-primary">₹<?= number_format((float)($l['remaining_amount'] ?? 0),0) ?></td>
+            <td class="fw-bold">₹<?= number_format((float)($l['monthly_payment'] ?? 0), 0) ?></td>
+            <td class="fw-bold text-primary">₹<?= number_format((float)($l['remaining_amount'] ?? 0), 0) ?></td>
+            <td><?= tenure_label($l['tenure_months'] ? (int)$l['tenure_months'] : null) ?></td>
+            <td>
+              <?php if ($emi_total > 0): ?>
+                <div style="font-size:.8rem" class="fw-semibold text-<?= $emi_left > 0 ? 'warning' : 'success' ?>">
+                  <?= $emi_paid ?>/<?= $emi_total ?> paid
+                </div>
+                <div class="progress mt-1" style="height:5px;border-radius:3px;min-width:70px">
+                  <div class="progress-bar bg-success" style="width:<?= $emi_total > 0 ? round(($emi_paid/$emi_total)*100) : 0 ?>%"></div>
+                </div>
+              <?php else: ?>
+                <span class="text-muted" style="font-size:.8rem">No schedule</span>
+              <?php endif; ?>
+            </td>
             <td>
               <?= $l['due_date'] ? date('d M Y', strtotime($l['due_date'])) : '—' ?>
               <?php if ($l['status'] !== 'paid' && $l['due_date']): ?>
-                <div style="font-size:.76rem;" class="text-<?= $days<0?'danger':($days<=7?'warning':'muted') ?>">
-                  <?= $days<0?abs($days).' days overdue':($days===0?'Today':$days.' days') ?>
+                <div style="font-size:.76rem;" class="text-<?= $days < 0 ? 'danger' : ($days <= 7 ? 'warning' : 'muted') ?>">
+                  <?= $days < 0 ? abs($days) . ' days overdue' : ($days === 0 ? 'Today' : $days . ' days') ?>
                 </div>
               <?php endif; ?>
             </td>
@@ -174,7 +310,7 @@ function payment_mode_badge($mode, $last4 = null) {
             <td>
               <div class="d-flex gap-1 flex-wrap">
                 <?php if ($l['status'] !== 'paid'): ?>
-                <form method="POST" onsubmit="return confirm('Mark this loan as paid?')" class="d-inline">
+                <form method="POST" onsubmit="return confirm('Mark loan + all EMIs as paid?')" class="d-inline">
                   <input type="hidden" name="action" value="mark_paid">
                   <input type="hidden" name="id" value="<?= $l['id'] ?>">
                   <button type="submit" class="btn btn-sm btn-success" title="Mark Paid">
@@ -182,10 +318,11 @@ function payment_mode_badge($mode, $last4 = null) {
                   </button>
                 </form>
                 <?php endif; ?>
-                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal"
+                <button class="btn btn-sm btn-outline-primary"
+                  data-bs-toggle="modal" data-bs-target="#editModal"
                   data-id="<?= $l['id'] ?>"
-                  data-name="<?= htmlspecialchars($l['name'],ENT_QUOTES) ?>"
-                  data-lender="<?= htmlspecialchars((string)($l['lender']??''),ENT_QUOTES) ?>"
+                  data-name="<?= htmlspecialchars($l['name'], ENT_QUOTES) ?>"
+                  data-lender="<?= htmlspecialchars((string)($l['lender'] ?? ''), ENT_QUOTES) ?>"
                   data-principal="<?= (float)($l['principal_amount'] ?? 0) ?>"
                   data-remaining="<?= (float)($l['remaining_amount'] ?? 0) ?>"
                   data-monthly="<?= (float)($l['monthly_payment'] ?? 0) ?>"
@@ -193,13 +330,15 @@ function payment_mode_badge($mode, $last4 = null) {
                   data-start="<?= (string)($l['start_date'] ?? '') ?>"
                   data-due="<?= (string)($l['due_date'] ?? '') ?>"
                   data-status="<?= $l['status'] ?>"
-                  data-notes="<?= htmlspecialchars((string)($l['notes']??''),ENT_QUOTES) ?>"
-                  data-paymode="<?= htmlspecialchars((string)($l['payment_mode']??'cash'),ENT_QUOTES) ?>"
-                  data-last4="<?= htmlspecialchars((string)($l['card_last4']??''),ENT_QUOTES) ?>"
+                  data-notes="<?= htmlspecialchars((string)($l['notes'] ?? ''), ENT_QUOTES) ?>"
+                  data-paymode="<?= htmlspecialchars((string)($l['payment_mode'] ?? 'cash'), ENT_QUOTES) ?>"
+                  data-last4="<?= htmlspecialchars((string)($l['card_last4'] ?? ''), ENT_QUOTES) ?>"
+                  data-tenure="<?= (int)($l['tenure_months'] ?? 0) ?>"
+                  data-emitotal="<?= $emi_total ?>"
                   onclick="populateEdit(this)" title="Edit">
                   <i class="fas fa-pen me-1"></i>Edit
                 </button>
-                <form method="POST" onsubmit="return confirm('Delete this loan?')" class="d-inline">
+                <form method="POST" onsubmit="return confirm('Delete this loan and its pending EMI schedule?')" class="d-inline">
                   <input type="hidden" name="action" value="delete">
                   <input type="hidden" name="id" value="<?= $l['id'] ?>">
                   <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
@@ -217,7 +356,7 @@ function payment_mode_badge($mode, $last4 = null) {
   </div>
 </div>
 
-<!-- ── Add Modal ── -->
+<!-- ── Add Modal ─────────────────────────────────────────────── -->
 <div class="modal fade" id="addModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -246,7 +385,7 @@ function payment_mode_badge($mode, $last4 = null) {
               <input type="number" name="remaining_amount" class="form-control" placeholder="0.00" min="0" step="0.01">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Monthly EMI (₹)</label>
+              <label class="form-label">Monthly EMI (₹) <span class="text-danger">*</span></label>
               <input type="number" name="monthly_payment" class="form-control" placeholder="0.00" min="0" step="0.01">
             </div>
             <div class="col-md-4">
@@ -258,8 +397,26 @@ function payment_mode_badge($mode, $last4 = null) {
               <input type="date" name="start_date" class="form-control">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Next Due Date <span class="text-danger">*</span></label>
+              <label class="form-label">First EMI Due Date <span class="text-danger">*</span></label>
               <input type="date" name="due_date" class="form-control" required>
+            </div>
+            <!-- Tenure -->
+            <div class="col-12">
+              <div class="alert alert-info py-2 mb-0" style="font-size:.83rem">
+                <i class="fas fa-calendar-check me-1"></i>
+                <strong>Loan Tenure</strong> — enter tenure to auto-create EMI entries in Expenses for every month.
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label"><i class="fas fa-hourglass-half me-1 text-muted"></i>Tenure Duration</label>
+              <input type="number" name="tenure_value" class="form-control" placeholder="e.g. 6 or 30" min="1" max="600">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Tenure Unit</label>
+              <select name="tenure_unit" class="form-control">
+                <option value="months">Months</option>
+                <option value="years">Years</option>
+              </select>
             </div>
             <div class="col-md-4">
               <label class="form-label">Status</label>
@@ -268,8 +425,9 @@ function payment_mode_badge($mode, $last4 = null) {
                 <option value="paid">Paid</option>
               </select>
             </div>
+            <!-- Payment mode -->
             <div class="col-md-4">
-              <label class="form-label">Payment Mode</label>
+              <label class="form-label"><i class="fas fa-wallet me-1 text-muted"></i>Payment Mode</label>
               <select name="payment_mode" id="add_paymode" class="form-control" onchange="toggleCard('add')">
                 <option value="cash">Cash</option>
                 <option value="bank_transfer">Bank Transfer</option>
@@ -278,8 +436,9 @@ function payment_mode_badge($mode, $last4 = null) {
               </select>
             </div>
             <div class="col-md-4" id="add_card_wrap" style="display:none;">
-              <label class="form-label">Last 4 Card Digits</label>
-              <input type="text" name="card_last4" id="add_card_last4" class="form-control" maxlength="4" pattern="\d{4}" placeholder="1234">
+              <label class="form-label"><i class="fas fa-credit-card me-1 text-muted"></i>Last 4 Card Digits</label>
+              <input type="text" name="card_last4" id="add_card_last4" class="form-control"
+                     maxlength="4" pattern="\d{4}" placeholder="1234" inputmode="numeric">
             </div>
             <div class="col-12">
               <label class="form-label">Notes</label>
@@ -289,14 +448,14 @@ function payment_mode_badge($mode, $last4 = null) {
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1"></i>Save Loan</button>
+          <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1"></i>Save Loan &amp; Generate Schedule</button>
         </div>
       </form>
     </div>
   </div>
 </div>
 
-<!-- ── Edit Modal ── -->
+<!-- ── Edit Modal ────────────────────────────────────────────── -->
 <div class="modal fade" id="editModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -338,8 +497,20 @@ function payment_mode_badge($mode, $last4 = null) {
               <input type="date" name="start_date" id="edit_start" class="form-control">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Next Due Date <span class="text-danger">*</span></label>
+              <label class="form-label">First EMI Due Date <span class="text-danger">*</span></label>
               <input type="date" name="due_date" id="edit_due" class="form-control" required>
+            </div>
+            <!-- Tenure -->
+            <div class="col-md-4">
+              <label class="form-label"><i class="fas fa-hourglass-half me-1 text-muted"></i>Tenure Duration</label>
+              <input type="number" name="tenure_value" id="edit_tenure_val" class="form-control" placeholder="e.g. 6" min="1" max="600">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Tenure Unit</label>
+              <select name="tenure_unit" id="edit_tenure_unit" class="form-control">
+                <option value="months">Months</option>
+                <option value="years">Years</option>
+              </select>
             </div>
             <div class="col-md-4">
               <label class="form-label">Status</label>
@@ -349,8 +520,20 @@ function payment_mode_badge($mode, $last4 = null) {
                 <option value="overdue">Overdue</option>
               </select>
             </div>
+            <!-- Regen checkbox -->
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="regen_emi" id="edit_regen_emi">
+                <label class="form-check-label" for="edit_regen_emi">
+                  <i class="fas fa-rotate me-1 text-warning"></i>
+                  Regenerate EMI schedule (replaces pending entries with updated tenure/EMI/mode)
+                </label>
+              </div>
+              <div id="edit_emi_info" class="text-muted mt-1" style="font-size:.8rem"></div>
+            </div>
+            <!-- Payment mode -->
             <div class="col-md-4">
-              <label class="form-label">Payment Mode</label>
+              <label class="form-label"><i class="fas fa-wallet me-1 text-muted"></i>Payment Mode</label>
               <select name="payment_mode" id="edit_paymode" class="form-control" onchange="toggleCard('edit')">
                 <option value="cash">Cash</option>
                 <option value="bank_transfer">Bank Transfer</option>
@@ -359,8 +542,9 @@ function payment_mode_badge($mode, $last4 = null) {
               </select>
             </div>
             <div class="col-md-4" id="edit_card_wrap" style="display:none;">
-              <label class="form-label">Last 4 Card Digits</label>
-              <input type="text" name="card_last4" id="edit_card_last4" class="form-control" maxlength="4" pattern="\d{4}" placeholder="1234">
+              <label class="form-label"><i class="fas fa-credit-card me-1 text-muted"></i>Last 4 Card Digits</label>
+              <input type="text" name="card_last4" id="edit_card_last4" class="form-control"
+                     maxlength="4" pattern="\d{4}" placeholder="1234" inputmode="numeric">
             </div>
             <div class="col-12">
               <label class="form-label">Notes</label>
@@ -381,10 +565,14 @@ function payment_mode_badge($mode, $last4 = null) {
 $extra_js = <<<'JS'
 <script>
 function toggleCard(prefix) {
-  const sel = document.getElementById(prefix + '_paymode');
+  const sel  = document.getElementById(prefix + '_paymode');
   const wrap = document.getElementById(prefix + '_card_wrap');
+  if (!sel || !wrap) return;
   wrap.style.display = sel.value === 'card' ? 'block' : 'none';
-  if (sel.value !== 'card') document.getElementById(prefix + '_card_last4').value = '';
+  if (sel.value !== 'card') {
+    const inp = document.getElementById(prefix + '_card_last4');
+    if (inp) inp.value = '';
+  }
 }
 function populateEdit(btn) {
   document.getElementById('edit_id').value        = btn.dataset.id;
@@ -398,9 +586,36 @@ function populateEdit(btn) {
   document.getElementById('edit_due').value       = btn.dataset.due;
   document.getElementById('edit_status').value    = btn.dataset.status;
   document.getElementById('edit_notes').value     = btn.dataset.notes;
-  document.getElementById('edit_paymode').value   = btn.dataset.paymode || 'cash';
-  document.getElementById('edit_card_last4').value = btn.dataset.last4 || '';
+
+  // Payment mode + card
+  const pm = document.getElementById('edit_paymode');
+  pm.value = btn.dataset.paymode || 'cash';
   toggleCard('edit');
+  if (pm.value === 'card') {
+    document.getElementById('edit_card_last4').value = btn.dataset.last4 || '';
+  }
+
+  // Tenure — convert stored months back to user-friendly value
+  const tenureMonths = parseInt(btn.dataset.tenure || '0', 10);
+  const info = document.getElementById('edit_emi_info');
+  if (tenureMonths > 0) {
+    const tval = document.getElementById('edit_tenure_val');
+    const tunit = document.getElementById('edit_tenure_unit');
+    if (tenureMonths % 12 === 0 && tenureMonths >= 12) {
+      tval.value  = tenureMonths / 12;
+      tunit.value = 'years';
+    } else {
+      tval.value  = tenureMonths;
+      tunit.value = 'months';
+    }
+    const emiTotal = parseInt(btn.dataset.emitotal || '0', 10);
+    if (info) info.textContent = 'Current schedule: ' + emiTotal + ' EMI entries. Tick "Regenerate" to rebuild.';
+  } else {
+    document.getElementById('edit_tenure_val').value = '';
+    document.getElementById('edit_tenure_unit').value = 'months';
+    if (info) info.textContent = 'No EMI schedule yet. Set a tenure and save to create one.';
+  }
+  document.getElementById('edit_regen_emi').checked = false;
 }
 document.getElementById('addModal').addEventListener('show.bs.modal', function () {
   document.getElementById('addForm').reset();
@@ -409,4 +624,3 @@ document.getElementById('addModal').addEventListener('show.bs.modal', function (
 </script>
 JS;
 require_once 'includes/footer.php';
-?>

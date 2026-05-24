@@ -2,55 +2,70 @@
 require_once 'includes/auth.php';
 require_once 'config.php';
 $page_title = 'Expenses';
-$uid  = (int)$_SESSION['id'];
+$uid   = (int)$_SESSION['id'];
 $today = date('Y-m-d');
-$msg  = '';
+$msg   = '';
 
-// ── Handle POST ─────────────────────────────────────────
+// ── Handle POST ──────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'add') {
-        $name      = trim($_POST['name'] ?? '');
-        $category  = trim($_POST['category'] ?? 'general');
-        $amount    = (float)($_POST['amount'] ?? 0);
-        $due_date  = $_POST['due_date'] ?? '';
-        $recurring = isset($_POST['is_recurring']) ? 1 : 0;
-        $recurrence= $_POST['recurrence'] ?? 'monthly';
-        $status    = $_POST['status'] ?? 'pending';
-        $notes     = trim($_POST['notes'] ?? '');
+        $name         = trim($_POST['name'] ?? '');
+        $category     = trim($_POST['category'] ?? 'general');
+        $amount       = (float)($_POST['amount'] ?? 0);
+        $due_date     = $_POST['due_date'] ?? '';
+        $recurring    = isset($_POST['is_recurring']) ? 1 : 0;
+        $recurrence   = $_POST['recurrence'] ?? 'monthly';
+        $status       = $_POST['status'] ?? 'pending';
+        $notes        = trim($_POST['notes'] ?? '');
+        $payment_mode = $_POST['payment_mode'] ?? 'cash';
+        $card_last4   = ($payment_mode === 'card')
+            ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4)
+            : null;
 
         if ($name && $due_date) {
             $stmt = mysqli_prepare($conn,
-                'INSERT INTO expenses (user_id,name,category,amount,due_date,is_recurring,recurrence,status,notes)
-                 VALUES (?,?,?,?,?,?,?,?,?)');
-            mysqli_stmt_bind_param($stmt,'issdsisss',$uid,$name,$category,$amount,$due_date,$recurring,$recurrence,$status,$notes);
+                'INSERT INTO expenses
+                    (user_id,name,category,amount,due_date,is_recurring,recurrence,status,notes,payment_mode,card_last4)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+            mysqli_stmt_bind_param($stmt, 'issdsisssss',
+                $uid, $name, $category, $amount, $due_date,
+                $recurring, $recurrence, $status, $notes, $payment_mode, $card_last4);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
-            AppLogger::action("Expense added: '$name' category=$category amount=₹$amount due=$due_date");
+            AppLogger::action("Expense added: '$name' category=$category amount=₹$amount mode=$payment_mode");
             $msg = 'success:Expense added.';
         }
     }
 
     if ($action === 'edit') {
-        $id        = (int)($_POST['id'] ?? 0);
-        $name      = trim($_POST['name'] ?? '');
-        $category  = trim($_POST['category'] ?? 'general');
-        $amount    = (float)($_POST['amount'] ?? 0);
-        $due_date  = $_POST['due_date'] ?? '';
-        $recurring = isset($_POST['is_recurring']) ? 1 : 0;
-        $recurrence= $_POST['recurrence'] ?? 'monthly';
-        $status    = $_POST['status'] ?? 'pending';
-        $notes     = trim($_POST['notes'] ?? '');
+        $id           = (int)($_POST['id'] ?? 0);
+        $name         = trim($_POST['name'] ?? '');
+        $category     = trim($_POST['category'] ?? 'general');
+        $amount       = (float)($_POST['amount'] ?? 0);
+        $due_date     = $_POST['due_date'] ?? '';
+        $recurring    = isset($_POST['is_recurring']) ? 1 : 0;
+        $recurrence   = $_POST['recurrence'] ?? 'monthly';
+        $status       = $_POST['status'] ?? 'pending';
+        $notes        = trim($_POST['notes'] ?? '');
+        $payment_mode = $_POST['payment_mode'] ?? 'cash';
+        $card_last4   = ($payment_mode === 'card')
+            ? substr(preg_replace('/\D/', '', $_POST['card_last4'] ?? ''), -4)
+            : null;
 
         if ($id && $name && $due_date) {
             $stmt = mysqli_prepare($conn,
-                'UPDATE expenses SET name=?,category=?,amount=?,due_date=?,is_recurring=?,recurrence=?,status=?,notes=?
+                'UPDATE expenses
+                    SET name=?,category=?,amount=?,due_date=?,is_recurring=?,recurrence=?,status=?,notes=?,payment_mode=?,card_last4=?
                  WHERE id=? AND user_id=?');
-            mysqli_stmt_bind_param($stmt,'ssdssissii',$name,$category,$amount,$due_date,$recurring,$recurrence,$status,$notes,$id,$uid);
+            mysqli_stmt_bind_param($stmt, 'ssdsisssssii',
+                $name, $category, $amount, $due_date,
+                $recurring, $recurrence, $status, $notes, $payment_mode, $card_last4,
+                $id, $uid);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
-            AppLogger::action("Expense updated: id=$id '$name' amount=₹$amount status=$status");
+            AppLogger::action("Expense updated: id=$id '$name' amount=₹$amount status=$status mode=$payment_mode");
             $msg = 'success:Expense updated.';
         }
     }
@@ -58,48 +73,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id) {
-            mysqli_query($conn,"DELETE FROM expenses WHERE id=$id AND user_id=$uid");
+            mysqli_query($conn, "DELETE FROM expenses WHERE id=$id AND user_id=$uid");
             AppLogger::action("Expense deleted: id=$id");
-            $msg='success:Expense deleted.';
+            $msg = 'success:Expense deleted.';
         }
     }
 
     if ($action === 'mark_paid') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id) {
-            mysqli_query($conn,"UPDATE expenses SET status='paid' WHERE id=$id AND user_id=$uid");
+            mysqli_query($conn, "UPDATE expenses SET status='paid' WHERE id=$id AND user_id=$uid");
             AppLogger::action("Expense marked paid: id=$id");
-            $msg='success:Marked as paid.';
+            $msg = 'success:Marked as paid.';
         }
     }
 
-    header('Location: expenses.php?msg='.urlencode($msg));
+    header('Location: expenses.php?msg=' . urlencode($msg));
     exit;
 }
 
 $msg = $_GET['msg'] ?? '';
 
 // Auto-overdue
-mysqli_query($conn,"UPDATE expenses SET status='overdue' WHERE user_id=$uid AND status='pending' AND due_date < '$today'");
+mysqli_query($conn, "UPDATE expenses SET status='overdue'
+    WHERE user_id=$uid AND status='pending' AND due_date < '$today'");
 
 $filter = $_GET['status'] ?? 'all';
-$where  = $filter !== 'all' ? "AND status='".mysqli_real_escape_string($conn,$filter)."'" : '';
-$result = mysqli_query($conn,"SELECT * FROM expenses WHERE user_id=$uid $where ORDER BY due_date ASC");
-$rows   = mysqli_fetch_all($result, MYSQLI_ASSOC);
+$where  = $filter !== 'all'
+    ? "AND status='" . mysqli_real_escape_string($conn, $filter) . "'"
+    : '';
+$result = mysqli_query($conn,
+    "SELECT * FROM expenses WHERE user_id=$uid $where ORDER BY due_date ASC");
+$rows = mysqli_fetch_all($result, MYSQLI_ASSOC);
 
-$categories = ['general','utilities','rent','groceries','subscription','insurance','transport','education','medical','entertainment','other'];
+$categories = [
+    'general','utilities','rent','groceries','subscription',
+    'insurance','transport','education','medical','entertainment','loan','other',
+];
 
 require_once 'includes/header.php';
 
-function exp_badge($s){
-    $map=['pending'=>'badge-pending','paid'=>'badge-paid','overdue'=>'badge-overdue'];
-    return '<span class="badge-status '.($map[$s]??'').'">'.$s.'</span>';
+function exp_badge(string $s): string {
+    $map = ['pending' => 'badge-pending', 'paid' => 'badge-paid', 'overdue' => 'badge-overdue'];
+    return '<span class="badge-status ' . ($map[$s] ?? '') . '">' . $s . '</span>';
+}
+
+function exp_pay_badge(string $mode, ?string $last4 = null): string {
+    $icons  = [
+        'cash'          => 'fa-money-bill-wave',
+        'bank_transfer' => 'fa-building-columns',
+        'card'          => 'fa-credit-card',
+        'upi'           => 'fa-mobile-screen-button',
+    ];
+    $labels = [
+        'cash'          => 'Cash',
+        'bank_transfer' => 'Bank Transfer',
+        'card'          => 'Card',
+        'upi'           => 'UPI',
+    ];
+    $icon  = $icons[$mode]  ?? 'fa-circle-question';
+    $label = $labels[$mode] ?? ucfirst($mode);
+    if ($mode === 'card' && $last4) $label .= ' ····' . $last4;
+    return '<span class="badge bg-light text-dark border" style="font-size:.73rem;white-space:nowrap;">'
+         . '<i class="fas ' . $icon . ' me-1"></i>' . $label . '</span>';
 }
 ?>
 
-<?php if ($msg): list($t,$text)=explode(':',$msg,2); ?>
-<div class="alert alert-<?= $t==='success'?'success':'danger' ?> alert-dismissible fade show">
-  <i class="fas fa-<?= $t==='success'?'circle-check':'circle-exclamation' ?> me-2"></i><?= htmlspecialchars($text) ?>
+<?php if ($msg): [$t, $text] = explode(':', $msg, 2); ?>
+<div class="alert alert-<?= $t === 'success' ? 'success' : 'danger' ?> alert-dismissible fade show">
+  <i class="fas fa-<?= $t === 'success' ? 'circle-check' : 'circle-exclamation' ?> me-2"></i>
+  <?= htmlspecialchars($text) ?>
   <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 <?php endif; ?>
@@ -109,8 +152,8 @@ function exp_badge($s){
     <h6 class="card-title"><i class="fas fa-receipt me-2 text-success"></i>Expenses</h6>
     <div class="d-flex gap-2 flex-wrap align-items-center">
       <div class="btn-group btn-group-sm">
-        <?php foreach(['all','pending','overdue','paid'] as $f): ?>
-          <a href="?status=<?= $f ?>" class="btn btn-<?= $filter===$f?'primary':'outline-secondary' ?>"><?= ucfirst($f) ?></a>
+        <?php foreach (['all', 'pending', 'overdue', 'paid'] as $f): ?>
+          <a href="?status=<?= $f ?>" class="btn btn-<?= $filter === $f ? 'primary' : 'outline-secondary' ?>"><?= ucfirst($f) ?></a>
         <?php endforeach; ?>
       </div>
       <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
@@ -122,33 +165,67 @@ function exp_badge($s){
     <div class="table-wrapper">
       <table class="table mb-0">
         <thead>
-          <tr><th>#</th><th>Name</th><th>Category</th><th>Amount</th><th>Due Date</th><th>Recurring</th><th>Status</th><th>Actions</th></tr>
+          <tr>
+            <th>#</th><th>Name</th><th>Category</th><th>Amount</th>
+            <th>Due Date</th><th>Payment</th><th>Recurring</th><th>Status</th><th>Actions</th>
+          </tr>
         </thead>
         <tbody>
           <?php if (empty($rows)): ?>
-          <tr><td colspan="8" class="text-center py-4 text-muted">No expenses found. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add one.</a></td></tr>
-          <?php else: foreach($rows as $i=>$e):
-            $days = $e['due_date'] ? (int)ceil((strtotime($e['due_date']) - time()) / 86400) : 0; ?>
           <tr>
-            <td class="text-muted"><?= $i+1 ?></td>
-            <td class="fw-semibold"><?= htmlspecialchars((string)($e['name'] ?? '')) ?>
-              <?php if(!empty($e['notes'])): ?><div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars(strlen((string)$e['notes'])>40 ? substr((string)$e['notes'],0,40).'…' : (string)$e['notes']) ?></div><?php endif; ?>
+            <td colspan="9" class="text-center py-4 text-muted">
+              No expenses found. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add one.</a>
             </td>
-            <td><span class="badge bg-light text-dark border" style="font-size:.75rem;"><?= htmlspecialchars(ucfirst((string)($e['category'] ?? 'general'))) ?></span></td>
-            <td class="fw-bold">₹<?= number_format((float)($e['amount'] ?? 0),0) ?></td>
-            <td>
-              <?= $e['due_date'] ? date('d M Y', strtotime($e['due_date'])) : '—' ?>
-              <?php if($e['status']!=='paid' && $e['due_date']): ?>
-                <div style="font-size:.76rem;" class="text-<?= $days<0?'danger':($days<=7?'warning':'muted') ?>">
-                  <?= $days<0?abs($days).' days overdue':($days===0?'Today':$days.' days') ?>
+          </tr>
+          <?php else: foreach ($rows as $i => $e):
+            $days = $e['due_date']
+                ? (int)ceil((strtotime($e['due_date']) - time()) / 86400)
+                : 0;
+          ?>
+          <tr>
+            <td class="text-muted"><?= $i + 1 ?></td>
+            <td class="fw-semibold">
+              <?= htmlspecialchars((string)($e['name'] ?? '')) ?>
+              <?php if (!empty($e['auto_generated'])): ?>
+                <span class="badge ms-1" style="font-size:.65rem;background:#6f42c1;color:#fff">
+                  <i class="fas fa-rotate me-1"></i>EMI
+                </span>
+              <?php endif; ?>
+              <?php if (!empty($e['notes'])): ?>
+                <div class="text-muted" style="font-size:.78rem;">
+                  <?= htmlspecialchars(strlen((string)$e['notes']) > 40
+                      ? substr((string)$e['notes'], 0, 40) . '…'
+                      : (string)$e['notes']) ?>
                 </div>
               <?php endif; ?>
             </td>
-            <td><?= $e['is_recurring'] ? '<span class="badge-status badge-active"><i class="fas fa-rotate me-1"></i>'.ucfirst((string)($e['recurrence']??'monthly')).'</span>' : '<span class="text-muted" style="font-size:.8rem;">One-time</span>' ?></td>
+            <td>
+              <span class="badge bg-light text-dark border" style="font-size:.75rem;">
+                <?= htmlspecialchars(ucfirst((string)($e['category'] ?? 'general'))) ?>
+              </span>
+            </td>
+            <td class="fw-bold">₹<?= number_format((float)($e['amount'] ?? 0), 0) ?></td>
+            <td>
+              <?= $e['due_date'] ? date('d M Y', strtotime($e['due_date'])) : '—' ?>
+              <?php if ($e['status'] !== 'paid' && $e['due_date']): ?>
+                <div style="font-size:.76rem;" class="text-<?= $days < 0 ? 'danger' : ($days <= 7 ? 'warning' : 'muted') ?>">
+                  <?= $days < 0
+                      ? abs($days) . ' days overdue'
+                      : ($days === 0 ? 'Today' : $days . ' days') ?>
+                </div>
+              <?php endif; ?>
+            </td>
+            <td><?= exp_pay_badge((string)($e['payment_mode'] ?? 'cash'), $e['card_last4'] ?? null) ?></td>
+            <td>
+              <?= $e['is_recurring']
+                  ? '<span class="badge-status badge-active"><i class="fas fa-rotate me-1"></i>'
+                    . ucfirst((string)($e['recurrence'] ?? 'monthly')) . '</span>'
+                  : '<span class="text-muted" style="font-size:.8rem;">One-time</span>' ?>
+            </td>
             <td><?= exp_badge((string)($e['status'] ?? 'pending')) ?></td>
             <td>
               <div class="d-flex gap-1 flex-wrap">
-                <?php if($e['status']!=='paid'): ?>
+                <?php if ($e['status'] !== 'paid'): ?>
                 <form method="POST" onsubmit="return confirm('Mark as paid?')" class="d-inline">
                   <input type="hidden" name="action" value="mark_paid">
                   <input type="hidden" name="id" value="<?= $e['id'] ?>">
@@ -157,16 +234,19 @@ function exp_badge($s){
                   </button>
                 </form>
                 <?php endif; ?>
-                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editModal"
+                <button class="btn btn-sm btn-outline-primary"
+                  data-bs-toggle="modal" data-bs-target="#editModal"
                   data-id="<?= $e['id'] ?>"
-                  data-name="<?= htmlspecialchars((string)($e['name']??''),ENT_QUOTES) ?>"
-                  data-category="<?= htmlspecialchars((string)($e['category']??'general'),ENT_QUOTES) ?>"
+                  data-name="<?= htmlspecialchars((string)($e['name'] ?? ''), ENT_QUOTES) ?>"
+                  data-category="<?= htmlspecialchars((string)($e['category'] ?? 'general'), ENT_QUOTES) ?>"
                   data-amount="<?= (float)($e['amount'] ?? 0) ?>"
                   data-due="<?= (string)($e['due_date'] ?? '') ?>"
                   data-recurring="<?= (int)($e['is_recurring'] ?? 0) ?>"
-                  data-recurrence="<?= htmlspecialchars((string)($e['recurrence']??'monthly'),ENT_QUOTES) ?>"
-                  data-status="<?= htmlspecialchars((string)($e['status']??'pending'),ENT_QUOTES) ?>"
-                  data-notes="<?= htmlspecialchars((string)($e['notes']??''),ENT_QUOTES) ?>"
+                  data-recurrence="<?= htmlspecialchars((string)($e['recurrence'] ?? 'monthly'), ENT_QUOTES) ?>"
+                  data-status="<?= htmlspecialchars((string)($e['status'] ?? 'pending'), ENT_QUOTES) ?>"
+                  data-notes="<?= htmlspecialchars((string)($e['notes'] ?? ''), ENT_QUOTES) ?>"
+                  data-paymode="<?= htmlspecialchars((string)($e['payment_mode'] ?? 'cash'), ENT_QUOTES) ?>"
+                  data-last4="<?= htmlspecialchars((string)($e['card_last4'] ?? ''), ENT_QUOTES) ?>"
                   onclick="populateEdit(this)" title="Edit">
                   <i class="fas fa-pen me-1"></i>Edit
                 </button>
@@ -187,7 +267,7 @@ function exp_badge($s){
   </div>
 </div>
 
-<!-- Add Modal -->
+<!-- ── Add Modal ─────────────────────────────────────────────── -->
 <div class="modal fade" id="addModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -195,7 +275,7 @@ function exp_badge($s){
         <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Add Expense</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form method="POST">
+      <form method="POST" id="addForm">
         <input type="hidden" name="action" value="add">
         <div class="modal-body">
           <div class="row g-3">
@@ -206,7 +286,9 @@ function exp_badge($s){
             <div class="col-md-6">
               <label class="form-label">Category</label>
               <select name="category" class="form-control">
-                <?php foreach($categories as $c): ?><option value="<?= $c ?>"><?= ucfirst($c) ?></option><?php endforeach; ?>
+                <?php foreach ($categories as $c): ?>
+                  <option value="<?= $c ?>"><?= ucfirst($c) ?></option>
+                <?php endforeach; ?>
               </select>
             </div>
             <div class="col-md-4">
@@ -224,9 +306,26 @@ function exp_badge($s){
                 <option value="paid">Paid</option>
               </select>
             </div>
+            <!-- Payment mode row -->
+            <div class="col-md-4">
+              <label class="form-label"><i class="fas fa-wallet me-1 text-muted"></i>Payment Mode</label>
+              <select name="payment_mode" id="add_paymode" class="form-control" onchange="toggleCard('add')">
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="card">Card</option>
+                <option value="upi">UPI</option>
+              </select>
+            </div>
+            <div class="col-md-4" id="add_card_wrap" style="display:none;">
+              <label class="form-label"><i class="fas fa-credit-card me-1 text-muted"></i>Last 4 Card Digits</label>
+              <input type="text" name="card_last4" id="add_card_last4" class="form-control"
+                     maxlength="4" pattern="\d{4}" placeholder="1234" inputmode="numeric">
+            </div>
+            <!-- Recurring -->
             <div class="col-12">
               <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="is_recurring" id="add_recurring" onchange="toggleRecurrence('add')">
+                <input class="form-check-input" type="checkbox" name="is_recurring"
+                       id="add_recurring" onchange="toggleRecurrence('add')">
                 <label class="form-check-label" for="add_recurring">Recurring expense</label>
               </div>
             </div>
@@ -254,7 +353,7 @@ function exp_badge($s){
   </div>
 </div>
 
-<!-- Edit Modal -->
+<!-- ── Edit Modal ────────────────────────────────────────────── -->
 <div class="modal fade" id="editModal" tabindex="-1">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -274,7 +373,9 @@ function exp_badge($s){
             <div class="col-md-6">
               <label class="form-label">Category</label>
               <select name="category" id="edit_category" class="form-control">
-                <?php foreach($categories as $c): ?><option value="<?= $c ?>"><?= ucfirst($c) ?></option><?php endforeach; ?>
+                <?php foreach ($categories as $c): ?>
+                  <option value="<?= $c ?>"><?= ucfirst($c) ?></option>
+                <?php endforeach; ?>
               </select>
             </div>
             <div class="col-md-4">
@@ -293,9 +394,26 @@ function exp_badge($s){
                 <option value="overdue">Overdue</option>
               </select>
             </div>
+            <!-- Payment mode row -->
+            <div class="col-md-4">
+              <label class="form-label"><i class="fas fa-wallet me-1 text-muted"></i>Payment Mode</label>
+              <select name="payment_mode" id="edit_paymode" class="form-control" onchange="toggleCard('edit')">
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="card">Card</option>
+                <option value="upi">UPI</option>
+              </select>
+            </div>
+            <div class="col-md-4" id="edit_card_wrap" style="display:none;">
+              <label class="form-label"><i class="fas fa-credit-card me-1 text-muted"></i>Last 4 Card Digits</label>
+              <input type="text" name="card_last4" id="edit_card_last4" class="form-control"
+                     maxlength="4" pattern="\d{4}" placeholder="1234" inputmode="numeric">
+            </div>
+            <!-- Recurring -->
             <div class="col-12">
               <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="is_recurring" id="edit_recurring" onchange="toggleRecurrence('edit')">
+                <input class="form-check-input" type="checkbox" name="is_recurring"
+                       id="edit_recurring" onchange="toggleRecurrence('edit')">
                 <label class="form-check-label" for="edit_recurring">Recurring expense</label>
               </div>
             </div>
@@ -326,29 +444,56 @@ function exp_badge($s){
 <?php
 $extra_js = <<<'JS'
 <script>
+function toggleCard(prefix) {
+  const sel  = document.getElementById(prefix + '_paymode');
+  const wrap = document.getElementById(prefix + '_card_wrap');
+  if (!sel || !wrap) return;
+  wrap.style.display = sel.value === 'card' ? 'block' : 'none';
+  if (sel.value !== 'card') {
+    const inp = document.getElementById(prefix + '_card_last4');
+    if (inp) inp.value = '';
+  }
+}
 function toggleRecurrence(prefix) {
-  const cb = document.getElementById(prefix + '_recurring');
+  const cb   = document.getElementById(prefix + '_recurring');
   const wrap = document.getElementById(prefix + '_recurrence_wrap');
+  if (!cb || !wrap) return;
   wrap.style.display = cb.checked ? 'block' : 'none';
 }
 function populateEdit(btn) {
   document.getElementById('edit_id').value       = btn.dataset.id;
   document.getElementById('edit_name').value     = btn.dataset.name;
-  document.getElementById('edit_category').value = btn.dataset.category;
   document.getElementById('edit_amount').value   = btn.dataset.amount;
   document.getElementById('edit_due').value      = btn.dataset.due;
   document.getElementById('edit_status').value   = btn.dataset.status;
   document.getElementById('edit_notes').value    = btn.dataset.notes;
+  document.getElementById('edit_category').value = btn.dataset.category;
+
+  // Payment mode + card
+  const pm = document.getElementById('edit_paymode');
+  if (pm) {
+    pm.value = btn.dataset.paymode || 'cash';
+    toggleCard('edit');
+    if (pm.value === 'card') {
+      const l4 = document.getElementById('edit_card_last4');
+      if (l4) l4.value = btn.dataset.last4 || '';
+    }
+  }
+
+  // Recurring
   const cb = document.getElementById('edit_recurring');
   cb.checked = btn.dataset.recurring === '1';
   toggleRecurrence('edit');
-  if (cb.checked) document.getElementById('edit_recurrence').value = btn.dataset.recurrence;
+  if (cb.checked) {
+    document.getElementById('edit_recurrence').value = btn.dataset.recurrence;
+  }
 }
+// Reset add modal on open
 document.getElementById('addModal').addEventListener('show.bs.modal', function () {
   this.querySelector('form').reset();
   document.getElementById('add_recurrence_wrap').style.display = 'none';
+  document.getElementById('add_card_wrap').style.display = 'none';
 });
 </script>
 JS;
 require_once 'includes/footer.php';
-?>

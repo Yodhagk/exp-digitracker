@@ -132,13 +132,32 @@ def main():
         "printf '%s' '%s' > /etc/php/8.3/apache2/conf.d/99-digitracker.ini" % ("%b", php_ini),
         sudo=True, desc="Write PHP ini")
 
+    # ── Step 6b: Run DB migrations ─────────────────────────────
+    print("\n[STEP 6b] Run database migrations")
+    for mig_file, desc_text in [
+        ("migrate_v3.sql", "v3: expenses.payment_mode + card_last4"),
+        ("migrate_v4.sql", "v4: loans.tenure_months + expenses.loan_ref_id/auto_generated"),
+    ]:
+        mig_local = os.path.join(PROJECT, mig_file)
+        sftp = client.open_sftp()
+        sftp.put(mig_local, "/tmp/" + mig_file)
+        sftp.close()
+        run(client, "mysql digitracker < /tmp/%s 2>&1 || true" % mig_file,
+            sudo=True, desc="Run %s (%s)" % (mig_file, desc_text))
+        run(client, "rm -f /tmp/" + mig_file)
+    run(client, "mysql digitracker -e \"DESCRIBE expenses\" 2>&1 | grep -E 'payment_mode|loan_ref|auto_gen'",
+        sudo=True, desc="Verify new columns exist")
+
     # ── Step 7: Deploy updated app files ──────────────────
     print("\n[STEP 7] Deploy updated PHP app files")
     app_files = [
         ("includes/logger.php",  REMOTE + "/includes/logger.php",  "644", "www-data:www-data"),
         ("includes/auth.php",    REMOTE + "/includes/auth.php",    "644", "www-data:www-data"),
+        ("includes/header.php",  REMOTE + "/includes/header.php",  "644", "www-data:www-data"),
         ("expenses.php",         REMOTE + "/expenses.php",         "644", "www-data:www-data"),
         ("loans.php",            REMOTE + "/loans.php",            "644", "www-data:www-data"),
+        ("dashboard.php",        REMOTE + "/dashboard.php",        "644", "www-data:www-data"),
+        ("reports.php",          REMOTE + "/reports.php",          "644", "www-data:www-data"),
     ]
     for local_rel, remote_path, mode, owner in app_files:
         local_abs = os.path.join(PROJECT, local_rel)
@@ -175,6 +194,8 @@ def main():
         desc="expenses.php response")
     run(client, "curl -s -o /dev/null -w 'loans.php: HTTP %{http_code}' http://localhost/loans.php",
         desc="loans.php response")
+    run(client, "curl -s -o /dev/null -w 'reports.php: HTTP %{http_code}' http://localhost/reports.php",
+        desc="reports.php response")
 
     # ── Final summary ──────────────────────────────────────
     print("\n" + "=" * 60)
