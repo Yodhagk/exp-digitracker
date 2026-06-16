@@ -12,10 +12,10 @@ function generate_emi_schedule(
     string $first_due, int $tenure_months, string $payment_mode, ?string $card_last4
 ): int {
     global $today;
-    // Remove only pending auto-generated entries — keep paid ones as history
+    // Remove ALL auto-generated entries so re-insert starts clean (no duplicates).
+    // Paid status is re-derived from due_date < today, so history is preserved correctly.
     mysqli_query($conn,
-        "DELETE FROM expenses WHERE loan_ref_id=$loan_id AND user_id=$uid
-         AND auto_generated=1 AND status='pending'");
+        "DELETE FROM expenses WHERE loan_ref_id=$loan_id AND user_id=$uid AND auto_generated=1");
 
     $dt    = new DateTime($first_due);
     $count = 0;
@@ -689,6 +689,8 @@ function tenure_label(?int $months, int $emi_paid = 0, int $emi_total = 0): stri
 <?php
 $extra_js = <<<'JS'
 <script>
+let _populatingEdit = false; // suppress auto-check of regen_emi during populate
+
 // ── Helpers ────────────────────────────────────────────────
 function toggleCard(prefix) {
   const sel  = document.getElementById(prefix + '_paymode');
@@ -757,7 +759,8 @@ function updateEmiPreview(prefix) {
     '<span class="text-warning fw-semibold">' + pending + ' pending</span> (upcoming months)';
 
   wrapEl.style.display = 'block';
-  if (prefix === 'edit') {
+  // Auto-check regen only when user actively changes fields, not on initial populate
+  if (prefix === 'edit' && !_populatingEdit) {
     const cb = document.getElementById('edit_regen_emi');
     if (cb && !cb.checked) cb.checked = true;
   }
@@ -765,6 +768,7 @@ function updateEmiPreview(prefix) {
 
 // ── Populate edit modal ────────────────────────────────────
 function populateEdit(btn) {
+  _populatingEdit = true;
   document.getElementById('edit_id').value        = btn.dataset.id;
   document.getElementById('edit_name').value      = btn.dataset.name;
   document.getElementById('edit_lender').value    = btn.dataset.lender;
@@ -809,8 +813,9 @@ function populateEdit(btn) {
   const wrap = document.getElementById('edit_emi_preview_wrap');
   if (wrap) wrap.style.display = 'none';
 
-  // Show live preview based on existing dates
+  // Show live preview — _populatingEdit flag prevents regen from being auto-checked
   updateEmiPreview('edit');
+  _populatingEdit = false;
 }
 
 document.getElementById('addModal').addEventListener('show.bs.modal', function () {
