@@ -73,7 +73,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? ($tenure_unit === 'years' ? $tenure_val * 12 : $tenure_val)
             : null;
 
-        if ($name && $due) {
+        // Derive first EMI date from start_date + 1 month (auto-marks past EMIs as paid)
+        if (!empty($start)) {
+            $dt  = new DateTime($start);
+            $dt->modify('+1 month');
+            $due = $dt->format('Y-m-d');
+        }
+
+        if ($name && ($due || $start)) {
             $stmt = mysqli_prepare($conn,
                 'INSERT INTO loans
                     (user_id,name,lender,principal_amount,remaining_amount,monthly_payment,
@@ -123,7 +130,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             : null;
         $regen_emi = isset($_POST['regen_emi']);
 
-        if ($id && $name && $due) {
+        // Derive first EMI date from start_date + 1 month (auto-marks past EMIs as paid)
+        if (!empty($start)) {
+            $dt  = new DateTime($start);
+            $dt->modify('+1 month');
+            $due = $dt->format('Y-m-d');
+        }
+
+        if ($id && $name && ($due || $start)) {
             $stmt = mysqli_prepare($conn,
                 'UPDATE loans
                     SET name=?,lender=?,principal_amount=?,remaining_amount=?,monthly_payment=?,
@@ -256,8 +270,8 @@ function tenure_label(?int $months): string {
           <tr>
             <th>#</th><th>Loan Name</th><th>Lender</th>
             <th>Monthly EMI</th><th>Remaining</th>
-            <th>Tenure</th><th>EMI Schedule</th>
-            <th>Due Date</th><th>Payment</th><th>Status</th><th>Actions</th>
+            <th>Date Opened</th><th>Tenure</th><th>EMI Schedule</th>
+            <th>1st EMI Date</th><th>Payment</th><th>Status</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -287,6 +301,13 @@ function tenure_label(?int $months): string {
             <td><?= htmlspecialchars((string)($l['lender'] ?? '–')) ?></td>
             <td class="fw-bold">₹<?= number_format((float)($l['monthly_payment'] ?? 0), 0) ?></td>
             <td class="fw-bold text-primary">₹<?= number_format((float)($l['remaining_amount'] ?? 0), 0) ?></td>
+            <td class="text-muted" style="font-size:.85rem">
+              <?php if (!empty($l['start_date'])): ?>
+                <?= date('d M Y', strtotime($l['start_date'])) ?>
+              <?php else: ?>
+                <span class="text-muted">—</span>
+              <?php endif; ?>
+            </td>
             <td><?= tenure_label($l['tenure_months'] ? (int)$l['tenure_months'] : null) ?></td>
             <td>
               <?php if ($emi_total > 0): ?>
@@ -396,27 +417,33 @@ function tenure_label(?int $months): string {
               <input type="number" name="interest_rate" class="form-control" placeholder="0.00" min="0" step="0.01">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Start Date</label>
-              <input type="date" name="start_date" class="form-control">
+              <label class="form-label"><i class="fas fa-calendar-day me-1 text-primary"></i>Date Loan Opened <span class="text-danger">*</span></label>
+              <input type="date" name="start_date" id="add_start" class="form-control"
+                     onchange="onStartDateChange('add')" required>
+              <div class="form-text">1st EMI date auto-calculated as next month</div>
             </div>
             <div class="col-md-4">
-              <label class="form-label">First EMI Due Date <span class="text-danger">*</span></label>
-              <input type="date" name="due_date" class="form-control" required>
+              <label class="form-label">1st EMI Due Date <small class="text-muted">(auto-filled)</small></label>
+              <input type="date" name="due_date" id="add_due" class="form-control" readonly
+                     style="background:#f8f9fa">
             </div>
             <!-- Tenure -->
             <div class="col-12">
               <div class="alert alert-info py-2 mb-0" style="font-size:.83rem">
                 <i class="fas fa-calendar-check me-1"></i>
-                <strong>Loan Tenure</strong> — enter tenure to auto-create EMI entries in Expenses for every month.
+                <strong>Loan Tenure</strong> — enter the loan opened date + tenure to auto-create monthly EMI entries.
+                Past EMIs will be automatically marked <strong>Paid</strong>.
               </div>
             </div>
             <div class="col-md-4">
               <label class="form-label"><i class="fas fa-hourglass-half me-1 text-muted"></i>Tenure Duration</label>
-              <input type="number" name="tenure_value" class="form-control" placeholder="e.g. 6 or 30" min="1" max="600">
+              <input type="number" name="tenure_value" id="add_tenure_val" class="form-control"
+                     placeholder="e.g. 6 or 30" min="1" max="600"
+                     onchange="updateEmiPreview('add')" oninput="updateEmiPreview('add')">
             </div>
             <div class="col-md-4">
               <label class="form-label">Tenure Unit</label>
-              <select name="tenure_unit" class="form-control">
+              <select name="tenure_unit" id="add_tenure_unit" class="form-control" onchange="updateEmiPreview('add')">
                 <option value="months">Months</option>
                 <option value="years">Years</option>
               </select>
@@ -427,6 +454,9 @@ function tenure_label(?int $months): string {
                 <option value="active">Active</option>
                 <option value="paid">Paid</option>
               </select>
+            </div>
+            <div class="col-12" id="add_emi_preview_wrap" style="display:none">
+              <div id="add_emi_preview" class="alert alert-success py-2 mb-0" style="font-size:.83rem"></div>
             </div>
             <!-- Payment mode -->
             <div class="col-md-4">
@@ -496,21 +526,26 @@ function tenure_label(?int $months): string {
               <input type="number" name="interest_rate" id="edit_rate" class="form-control" min="0" step="0.01">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Start Date</label>
-              <input type="date" name="start_date" id="edit_start" class="form-control">
+              <label class="form-label"><i class="fas fa-calendar-day me-1 text-primary"></i>Date Loan Opened <span class="text-danger">*</span></label>
+              <input type="date" name="start_date" id="edit_start" class="form-control"
+                     onchange="onStartDateChange('edit')">
+              <div class="form-text">1st EMI = this date + 1 month</div>
             </div>
             <div class="col-md-4">
-              <label class="form-label">First EMI Due Date <span class="text-danger">*</span></label>
-              <input type="date" name="due_date" id="edit_due" class="form-control" required>
+              <label class="form-label">1st EMI Due Date <small class="text-muted">(auto-filled)</small></label>
+              <input type="date" name="due_date" id="edit_due" class="form-control" readonly
+                     style="background:#f8f9fa">
             </div>
             <!-- Tenure -->
             <div class="col-md-4">
               <label class="form-label"><i class="fas fa-hourglass-half me-1 text-muted"></i>Tenure Duration</label>
-              <input type="number" name="tenure_value" id="edit_tenure_val" class="form-control" placeholder="e.g. 6" min="1" max="600">
+              <input type="number" name="tenure_value" id="edit_tenure_val" class="form-control"
+                     placeholder="e.g. 6" min="1" max="600"
+                     onchange="updateEmiPreview('edit')" oninput="updateEmiPreview('edit')">
             </div>
             <div class="col-md-4">
               <label class="form-label">Tenure Unit</label>
-              <select name="tenure_unit" id="edit_tenure_unit" class="form-control">
+              <select name="tenure_unit" id="edit_tenure_unit" class="form-control" onchange="updateEmiPreview('edit')">
                 <option value="months">Months</option>
                 <option value="years">Years</option>
               </select>
@@ -523,13 +558,16 @@ function tenure_label(?int $months): string {
                 <option value="overdue">Overdue</option>
               </select>
             </div>
-            <!-- Regen checkbox -->
+            <!-- Regen checkbox + live preview -->
             <div class="col-12">
+              <div id="edit_emi_preview_wrap" class="alert alert-info py-2 mb-2" style="font-size:.83rem;display:none">
+                <div id="edit_emi_preview"></div>
+              </div>
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" name="regen_emi" id="edit_regen_emi">
                 <label class="form-check-label" for="edit_regen_emi">
                   <i class="fas fa-rotate me-1 text-warning"></i>
-                  Regenerate EMI schedule (replaces pending entries with updated tenure/EMI/mode)
+                  Regenerate EMI schedule — rebuilds from Date Opened, marks past months <strong>Paid</strong>
                 </label>
               </div>
               <div id="edit_emi_info" class="text-muted mt-1" style="font-size:.8rem"></div>
@@ -567,6 +605,7 @@ function tenure_label(?int $months): string {
 <?php
 $extra_js = <<<'JS'
 <script>
+// ── Helpers ────────────────────────────────────────────────
 function toggleCard(prefix) {
   const sel  = document.getElementById(prefix + '_paymode');
   const wrap = document.getElementById(prefix + '_card_wrap');
@@ -577,6 +616,70 @@ function toggleCard(prefix) {
     if (inp) inp.value = '';
   }
 }
+
+// ── Auto-fill 1st EMI date = start_date + 1 month ─────────
+function onStartDateChange(prefix) {
+  const startEl = document.getElementById(prefix + '_start');
+  const dueEl   = document.getElementById(prefix + '_due');
+  if (!startEl || !startEl.value) return;
+
+  // Add 1 month to start date
+  const parts = startEl.value.split('-');
+  let y = parseInt(parts[0]), m = parseInt(parts[1]) - 1, d = parseInt(parts[2]);
+  m += 1;
+  if (m > 11) { m = 0; y++; }
+  // Keep same day-of-month (clamp to month end)
+  const maxDay = new Date(y, m + 1, 0).getDate();
+  d = Math.min(d, maxDay);
+  const pad = n => String(n).padStart(2, '0');
+  dueEl.value = y + '-' + pad(m + 1) + '-' + pad(d);
+
+  updateEmiPreview(prefix);
+}
+
+// ── Live EMI preview: paid vs pending count ────────────────
+function updateEmiPreview(prefix) {
+  const dueEl      = document.getElementById(prefix + '_due');
+  const tenureVal  = parseInt(document.getElementById(prefix + '_tenure_val')?.value || '0', 10);
+  const tenureUnit = document.getElementById(prefix + '_tenure_unit')?.value || 'months';
+  const previewEl  = document.getElementById(prefix + '_emi_preview');
+  const wrapEl     = document.getElementById(prefix + '_emi_preview_wrap');
+
+  if (!previewEl || !wrapEl || !dueEl?.value || !tenureVal) {
+    if (wrapEl) wrapEl.style.display = 'none';
+    return;
+  }
+
+  const totalMonths = tenureUnit === 'years' ? tenureVal * 12 : tenureVal;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Simulate dates
+  const [fy, fm, fd] = dueEl.value.split('-').map(Number);
+  let paid = 0, pending = 0;
+  for (let i = 0; i < totalMonths; i++) {
+    let em = fm - 1 + i, ey = fy;
+    ey += Math.floor(em / 12);
+    em  = em % 12;
+    const maxD  = new Date(ey, em + 1, 0).getDate();
+    const emiDt = new Date(ey, em, Math.min(fd, maxD));
+    emiDt < today ? paid++ : pending++;
+  }
+
+  previewEl.innerHTML =
+    '<i class="fas fa-calendar-check me-1 text-success"></i>' +
+    '<strong>' + totalMonths + ' total EMIs</strong> — ' +
+    '<span class="text-success fw-semibold">' + paid + ' already paid</span> (past months) + ' +
+    '<span class="text-warning fw-semibold">' + pending + ' pending</span> (upcoming months)';
+
+  wrapEl.style.display = 'block';
+  if (prefix === 'edit') {
+    const cb = document.getElementById('edit_regen_emi');
+    if (cb && !cb.checked) cb.checked = true;
+  }
+}
+
+// ── Populate edit modal ────────────────────────────────────
 function populateEdit(btn) {
   document.getElementById('edit_id').value        = btn.dataset.id;
   document.getElementById('edit_name').value      = btn.dataset.name;
@@ -600,7 +703,8 @@ function populateEdit(btn) {
 
   // Tenure — convert stored months back to user-friendly value
   const tenureMonths = parseInt(btn.dataset.tenure || '0', 10);
-  const info = document.getElementById('edit_emi_info');
+  const emiTotal     = parseInt(btn.dataset.emitotal || '0', 10);
+  const info         = document.getElementById('edit_emi_info');
   if (tenureMonths > 0) {
     const tval = document.getElementById('edit_tenure_val');
     const tunit = document.getElementById('edit_tenure_unit');
@@ -611,18 +715,25 @@ function populateEdit(btn) {
       tval.value  = tenureMonths;
       tunit.value = 'months';
     }
-    const emiTotal = parseInt(btn.dataset.emitotal || '0', 10);
-    if (info) info.textContent = 'Current schedule: ' + emiTotal + ' EMI entries. Tick "Regenerate" to rebuild.';
+    if (info) info.textContent = 'Current: ' + emiTotal + ' EMI entries. Update "Date Opened" + tick Regenerate to recalculate paid/pending.';
   } else {
-    document.getElementById('edit_tenure_val').value = '';
+    document.getElementById('edit_tenure_val').value  = '';
     document.getElementById('edit_tenure_unit').value = 'months';
-    if (info) info.textContent = 'No EMI schedule yet. Set a tenure and save to create one.';
+    if (info) info.textContent = 'No EMI schedule yet. Enter Date Opened + tenure and save.';
   }
   document.getElementById('edit_regen_emi').checked = false;
+  const wrap = document.getElementById('edit_emi_preview_wrap');
+  if (wrap) wrap.style.display = 'none';
+
+  // Show live preview based on existing dates
+  updateEmiPreview('edit');
 }
+
 document.getElementById('addModal').addEventListener('show.bs.modal', function () {
   document.getElementById('addForm').reset();
   document.getElementById('add_card_wrap').style.display = 'none';
+  const pw = document.getElementById('add_emi_preview_wrap');
+  if (pw) pw.style.display = 'none';
 });
 </script>
 JS;
