@@ -13,6 +13,7 @@ echo "==> Target  : $WEBROOT"
 ROOT_FILES=(
   dashboard.php expenses.php loans.php reports.php
   invoices.php warranties.php upcoming.php
+  ccard.php shopping.php
   index.php login.php logout.php register.php config.php
 )
 for f in "${ROOT_FILES[@]}"; do

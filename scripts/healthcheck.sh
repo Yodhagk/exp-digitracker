@@ -92,7 +92,7 @@ fi
 
 # App files
 for F in config.php index.php dashboard.php expenses.php loans.php \
-          invoices.php warranties.php upcoming.php; do
+          invoices.php warranties.php upcoming.php ccard.php shopping.php; do
     if [[ -f "${APP_DIR}/${F}" ]]; then
         ok "File present: $F"
     else
