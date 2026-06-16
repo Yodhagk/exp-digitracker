@@ -202,7 +202,7 @@ mysqli_query($conn, "UPDATE loans SET status='overdue'
 mysqli_query($conn, "UPDATE expenses SET status='paid'
     WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$today'");
 
-// Fetch loans with EMI count
+// Fetch loans with EMI counts + next pending EMI date
 $filter = $_GET['status'] ?? 'all';
 $where  = $filter !== 'all'
     ? "AND l.status='" . mysqli_real_escape_string($conn, $filter) . "'"
@@ -210,10 +210,23 @@ $where  = $filter !== 'all'
 $result = mysqli_query($conn,
     "SELECT l.*,
         (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1) AS emi_total,
-        (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1 AND e.status='paid') AS emi_paid
+        (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1 AND e.status='paid') AS emi_paid,
+        (SELECT MIN(e.due_date) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1 AND e.status='pending') AS next_emi_date
      FROM loans l
      WHERE l.user_id=$uid $where ORDER BY l.due_date ASC");
 $loans = mysqli_fetch_all($result, MYSQLI_ASSOC);
+
+// Upcoming monthly EMI totals (next 6 months of pending EMIs across all loans)
+$upcoming_r = mysqli_query($conn,
+    "SELECT DATE_FORMAT(due_date,'%Y-%m') AS month_key,
+            DATE_FORMAT(due_date,'%b %Y')  AS month_label,
+            SUM(amount)  AS total_amount,
+            COUNT(*)     AS emi_count
+     FROM expenses
+     WHERE user_id=$uid AND auto_generated=1 AND status='pending' AND due_date >= '$today'
+     GROUP BY month_key, month_label
+     ORDER BY month_key LIMIT 6");
+$upcoming_months = mysqli_fetch_all($upcoming_r, MYSQLI_ASSOC);
 
 require_once 'includes/header.php';
 
@@ -232,13 +245,18 @@ function payment_mode_badge(string $mode, ?string $last4 = null): string {
          . '<i class="fas ' . $icon . ' me-1"></i>' . $label . '</span>';
 }
 
-function tenure_label(?int $months): string {
+function tenure_label(?int $months, int $emi_paid = 0, int $emi_total = 0): string {
     if (!$months) return '<span class="text-muted">—</span>';
-    if ($months % 12 === 0 && $months >= 12) {
-        $y = $months / 12;
-        return $y . ' yr' . ($y > 1 ? 's' : '') . ' <span class="text-muted" style="font-size:.75rem;">(' . $months . ' mo)</span>';
-    }
-    return $months . ' months';
+    $remaining = $emi_total > 0 ? max(0, $emi_total - $emi_paid) : null;
+    $total_str = ($months % 12 === 0 && $months >= 12)
+        ? ($months / 12) . ' yr' . (($months / 12) > 1 ? 's' : '') . ' <span class="text-muted" style="font-size:.72rem;">(' . $months . ' mo)</span>'
+        : $months . ' mo';
+    if ($remaining === null) return $total_str;
+    if ($remaining === 0)
+        return $total_str . ' <span class="badge bg-success" style="font-size:.7rem;">Done</span>';
+    return $total_str . '<div style="font-size:.76rem;margin-top:2px;">'
+        . '<span class="text-warning fw-semibold">' . $remaining . ' left</span>'
+        . ' <span class="text-muted">/ ' . $emi_total . ' total</span></div>';
 }
 ?>
 
@@ -271,7 +289,7 @@ function tenure_label(?int $months): string {
             <th>#</th><th>Loan Name</th><th>Lender</th>
             <th>Monthly EMI</th><th>Remaining</th>
             <th>Date Opened</th><th>Tenure</th><th>EMI Schedule</th>
-            <th>1st EMI Date</th><th>Payment</th><th>Status</th><th>Actions</th>
+            <th>Next EMI Due</th><th>Payment</th><th>Status</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -283,10 +301,11 @@ function tenure_label(?int $months): string {
           </tr>
           <?php else: ?>
           <?php foreach ($loans as $i => $l):
-            $days = $l['due_date'] ? (int)ceil((strtotime($l['due_date']) - time()) / 86400) : 0;
-            $emi_total = (int)$l['emi_total'];
-            $emi_paid  = (int)$l['emi_paid'];
-            $emi_left  = $emi_total - $emi_paid;
+            $emi_total    = (int)$l['emi_total'];
+            $emi_paid     = (int)$l['emi_paid'];
+            $emi_left     = $emi_total - $emi_paid;
+            $next_emi     = $l['next_emi_date'] ?? null;
+            $next_days    = $next_emi ? (int)ceil((strtotime($next_emi) - time()) / 86400) : null;
           ?>
           <tr>
             <td class="text-muted"><?= $i + 1 ?></td>
@@ -308,7 +327,7 @@ function tenure_label(?int $months): string {
                 <span class="text-muted">—</span>
               <?php endif; ?>
             </td>
-            <td><?= tenure_label($l['tenure_months'] ? (int)$l['tenure_months'] : null) ?></td>
+            <td><?= tenure_label($l['tenure_months'] ? (int)$l['tenure_months'] : null, $emi_paid, $emi_total) ?></td>
             <td>
               <?php if ($emi_total > 0): ?>
                 <div style="font-size:.8rem" class="fw-semibold text-<?= $emi_left > 0 ? 'warning' : 'success' ?>">
@@ -317,16 +336,41 @@ function tenure_label(?int $months): string {
                 <div class="progress mt-1" style="height:5px;border-radius:3px;min-width:70px">
                   <div class="progress-bar bg-success" style="width:<?= $emi_total > 0 ? round(($emi_paid/$emi_total)*100) : 0 ?>%"></div>
                 </div>
+                <?php if ($emi_left > 0 && $l['monthly_payment']): ?>
+                  <div style="font-size:.75rem;margin-top:3px;" class="text-muted">
+                    ₹<?= number_format((float)$l['monthly_payment'], 0) ?>/mo × <?= $emi_left ?> left
+                  </div>
+                <?php endif; ?>
               <?php else: ?>
                 <span class="text-muted" style="font-size:.8rem">No schedule</span>
               <?php endif; ?>
             </td>
             <td>
-              <?= $l['due_date'] ? date('d M Y', strtotime($l['due_date'])) : '—' ?>
-              <?php if ($l['status'] !== 'paid' && $l['due_date']): ?>
-                <div style="font-size:.76rem;" class="text-<?= $days < 0 ? 'danger' : ($days <= 7 ? 'warning' : 'muted') ?>">
-                  <?= $days < 0 ? abs($days) . ' days overdue' : ($days === 0 ? 'Today' : $days . ' days') ?>
+              <?php if ($next_emi): ?>
+                <div class="fw-semibold" style="font-size:.88rem;">
+                  <?= date('d M Y', strtotime($next_emi)) ?>
                 </div>
+                <div style="font-size:.75rem;" class="text-<?= $next_days < 0 ? 'danger' : ($next_days <= 7 ? 'warning' : ($next_days <= 30 ? 'primary' : 'muted')) ?>">
+                  <i class="fas fa-<?= $next_days < 0 ? 'exclamation-triangle' : 'clock' ?> me-1"></i>
+                  <?php if ($next_days < 0): ?>
+                    <?= abs($next_days) ?> days overdue
+                  <?php elseif ($next_days === 0): ?>
+                    Due today
+                  <?php elseif ($next_days <= 30): ?>
+                    in <?= $next_days ?> days
+                  <?php else: ?>
+                    in <?= $next_days ?> days
+                  <?php endif; ?>
+                </div>
+                <div style="font-size:.74rem;margin-top:2px;" class="text-success fw-semibold">
+                  ₹<?= number_format((float)$l['monthly_payment'], 0) ?> due
+                </div>
+              <?php elseif ($emi_total > 0 && $emi_left === 0): ?>
+                <span class="badge bg-success" style="font-size:.75rem;">
+                  <i class="fas fa-circle-check me-1"></i>All EMIs Done
+                </span>
+              <?php else: ?>
+                <span class="text-muted">—</span>
               <?php endif; ?>
             </td>
             <td><?= payment_mode_badge((string)($l['payment_mode'] ?? 'cash'), $l['card_last4'] ?? null) ?></td>
@@ -379,6 +423,46 @@ function tenure_label(?int $months): string {
     </div>
   </div>
 </div>
+
+<!-- ── Upcoming Monthly EMI Totals ───────────────────────────── -->
+<?php if (!empty($upcoming_months)): ?>
+<div class="card mt-3">
+  <div class="card-header">
+    <h6 class="card-title mb-0">
+      <i class="fas fa-calendar-alt me-2 text-warning"></i>Upcoming Monthly EMI Totals
+    </h6>
+  </div>
+  <div class="card-body py-3">
+    <div class="d-flex flex-wrap gap-3">
+      <?php foreach ($upcoming_months as $idx => $m):
+        $is_current = (date('Y-m') === $m['month_key']);
+        $is_next    = (date('Y-m', strtotime('+1 month')) === $m['month_key']);
+      ?>
+      <div class="text-center px-3 py-2 rounded border <?= $is_current ? 'border-warning bg-warning bg-opacity-10' : ($is_next ? 'border-primary bg-primary bg-opacity-10' : 'bg-light') ?>"
+           style="min-width:130px;">
+        <div style="font-size:.78rem;font-weight:600;letter-spacing:.4px;" class="text-<?= $is_current ? 'warning' : ($is_next ? 'primary' : 'secondary') ?> text-uppercase">
+          <?php if ($is_current): ?>
+            <i class="fas fa-circle-dot me-1"></i>This Month
+          <?php elseif ($is_next): ?>
+            <i class="fas fa-arrow-right me-1"></i>Next Month
+          <?php else: ?>
+            <?= htmlspecialchars($m['month_label']) ?>
+          <?php endif; ?>
+        </div>
+        <?php if ($is_current || $is_next): ?>
+          <div style="font-size:.72rem;" class="text-muted"><?= htmlspecialchars($m['month_label']) ?></div>
+        <?php endif; ?>
+        <div class="fw-bold mt-1" style="font-size:1.1rem;">₹<?= number_format((float)$m['total_amount'], 0) ?></div>
+        <div style="font-size:.72rem;" class="text-muted"><?= $m['emi_count'] ?> EMI<?= $m['emi_count'] > 1 ? 's' : '' ?></div>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <div class="text-muted mt-2" style="font-size:.75rem;">
+      <i class="fas fa-info-circle me-1"></i>Showing next 6 months of pending EMIs across all active loans.
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <!-- ── Add Modal ─────────────────────────────────────────────── -->
 <div class="modal fade" id="addModal" tabindex="-1">
