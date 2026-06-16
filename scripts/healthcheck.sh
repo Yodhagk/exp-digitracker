@@ -100,14 +100,15 @@ for F in config.php index.php dashboard.php expenses.php loans.php \
     fi
 done
 
-# Upload directories
+# Upload directories — check www-data ownership (set by deploy-app.sh chown)
 for D in uploads/invoices uploads/warranties; do
     FULL="${APP_DIR}/${D}"
     if [[ -d "$FULL" ]]; then
-        if [[ -w "$FULL" ]]; then
-            ok "Upload dir writable: $D"
+        OWNER=$(stat -c '%U' "$FULL" 2>/dev/null || echo "unknown")
+        if [[ "$OWNER" == "www-data" ]]; then
+            ok "Upload dir owned by www-data: $D"
         else
-            warn "Upload dir NOT writable: $D"
+            warn "Upload dir owner is '$OWNER' (expected www-data): $D"
         fi
     else
         fail "Upload dir MISSING: $D"
@@ -138,12 +139,12 @@ else
     fail "Memory critical: ${MEM_FREE}MB free"
 fi
 
-# Log directory
-if [[ -d "$LOG_DIR" && -w "$LOG_DIR" ]]; then
+# Log directory — existence check only (written by services, not CI runner)
+if [[ -d "$LOG_DIR" ]]; then
     LOG_SIZE=$(du -sh "$LOG_DIR" 2>/dev/null | awk '{print $1}')
-    ok "App log dir writable (${LOG_SIZE} total)"
+    ok "App log dir exists (${LOG_SIZE} total)"
 else
-    warn "App log dir missing or not writable: ${LOG_DIR}"
+    warn "App log dir missing: ${LOG_DIR}"
 fi
 
 out ""

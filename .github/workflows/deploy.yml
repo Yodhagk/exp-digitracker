@@ -16,6 +16,8 @@ jobs:
     name: Deploy to Production (192.168.1.138)
     runs-on: [self-hosted, digitracker-prod]
     timeout-minutes: 10
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout code
@@ -40,7 +42,13 @@ jobs:
         run: sudo systemctl reload apache2
 
       - name: Run health check
-        run: /var/app/script/healthcheck.sh
+        run: |
+          set +e
+          /var/app/script/healthcheck.sh
+          hc=$?
+          # exit 0=healthy, 1=degraded(warnings only), 2=critical(failures)
+          [ $hc -lt 2 ] || { echo "Health check CRITICAL — aborting deployment"; exit 1; }
+          [ $hc -eq 0 ] && echo "Health: HEALTHY" || echo "Health: DEGRADED (warnings present)"
 
       - name: Smoke test
         run: |

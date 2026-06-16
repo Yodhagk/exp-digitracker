@@ -34,4 +34,17 @@ done
 sudo chown -R www-data:www-data "$WEBROOT"
 sudo find "$WEBROOT" -name "*.php" -exec chmod 644 {} \;
 
+# Sync operational scripts (healthcheck, etc.) to /var/app/script/
+SCRIPT_SRC="$WORKSPACE/scripts"
+SCRIPT_DST="/var/app/script"
+if [ -d "$SCRIPT_SRC" ]; then
+  sudo mkdir -p "$SCRIPT_DST"
+  for s in "$SCRIPT_SRC"/*.sh; do
+    [ -f "$s" ] || continue
+    sudo cp "$s" "$SCRIPT_DST/$(basename "$s")"
+    sudo chmod 755 "$SCRIPT_DST/$(basename "$s")"
+    echo "  synced: scripts/$(basename "$s")"
+  done
+fi
+
 echo "==> App files deployed successfully"
