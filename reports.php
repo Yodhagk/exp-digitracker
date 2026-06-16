@@ -9,9 +9,11 @@ $today = date('Y-m-d');
 $current_year = (int)date('Y');
 $year = max(2000, min(2100, (int)($_GET['year'] ?? $current_year)));
 
-// Auto-mark overdue before running any report queries
+// Auto-mark: past-due EMIs → paid; regular expenses → overdue
+mysqli_query($conn, "UPDATE expenses SET status='paid'
+    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$today'");
 mysqli_query($conn, "UPDATE expenses SET status='overdue'
-    WHERE user_id=$uid AND status='pending' AND due_date < '$today'");
+    WHERE user_id=$uid AND auto_generated=0 AND status='pending' AND due_date < '$today'");
 
 // ── Yearly totals ──────────────────────────────────────────────
 $r = mysqli_query($conn, "
@@ -111,13 +113,29 @@ $non_card_total = $yearly['total_amount'] - $card_total;
 $non_card_paid  = $yearly['paid_amount']  - $card_paid;
 $non_card_count = (int)$yearly['total_count'] - $card_count;
 
+// ── Monthly EMI breakdown (auto-generated only) ────────────────
+$r = mysqli_query($conn, "
+    SELECT MONTH(due_date) AS month_num,
+        COALESCE(SUM(amount), 0)                                              AS emi_total,
+        COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END), 0)     AS emi_paid,
+        COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END), 0)  AS emi_pending,
+        COUNT(*)                                                              AS emi_count,
+        SUM(CASE WHEN status='paid'    THEN 1 ELSE 0 END)                   AS emi_paid_count,
+        SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END)                   AS emi_pending_count
+    FROM expenses
+    WHERE user_id=$uid AND YEAR(due_date)=$year AND auto_generated=1
+    GROUP BY MONTH(due_date)
+");
+$emi_monthly = [];
+while ($row = mysqli_fetch_assoc($r)) $emi_monthly[(int)$row['month_num']] = $row;
+
 // ── All expense detail rows keyed by month_num ────────────────
 $detail = [];
 $r = mysqli_query($conn, "
     SELECT *, MONTH(due_date) AS month_num
     FROM expenses
     WHERE user_id=$uid AND YEAR(due_date)=$year
-    ORDER BY due_date ASC, name ASC
+    ORDER BY auto_generated ASC, due_date ASC, name ASC
 ");
 while ($row = mysqli_fetch_assoc($r)) {
     $detail[(int)$row['month_num']][] = $row;
@@ -458,25 +476,31 @@ function rpt_pay_badge(string $mode, ?string $last4 = null): string {
           <tr>
             <th style="width:36px"></th>
             <th>Month</th>
-            <th>Total Amount</th>
+            <th>Total Spent</th>
             <th class="text-success">Paid</th>
             <th class="text-warning">Pending</th>
             <th class="text-danger">Overdue</th>
-            <th style="min-width:140px">Progress</th>
-            <th>Items</th>
+            <th style="min-width:100px">EMI Closed</th>
+            <th style="min-width:100px">EMI Pending</th>
+            <th style="min-width:130px">Progress</th>
           </tr>
         </thead>
         <tbody>
           <?php foreach ($monthly_rows as $m):
-            $mn       = (int)$m['month_num'];
-            $m_total  = (float)$m['total_amount'];
-            $m_paid   = (float)$m['paid_amount'];
-            $m_pend   = (float)$m['pending_amount'];
-            $m_over   = (float)$m['overdue_amount'];
-            $mp_pct   = $m_total > 0 ? round(($m_paid  / $m_total) * 100) : 0;
-            $mo_pct   = $m_total > 0 ? round(($m_over  / $m_total) * 100) : 0;
-            $is_cur   = ($mn === (int)date('n') && $year === $current_year);
-            $acc_id   = 'acc-m-' . $mn;
+            $mn        = (int)$m['month_num'];
+            $m_total   = (float)$m['total_amount'];
+            $m_paid    = (float)$m['paid_amount'];
+            $m_pend    = (float)$m['pending_amount'];
+            $m_over    = (float)$m['overdue_amount'];
+            $mp_pct    = $m_total > 0 ? round(($m_paid / $m_total) * 100) : 0;
+            $mo_pct    = $m_total > 0 ? round(($m_over / $m_total) * 100) : 0;
+            $is_cur    = ($mn === (int)date('n') && $year === $current_year);
+            $acc_id    = 'acc-m-' . $mn;
+            $emi       = $emi_monthly[$mn] ?? null;
+            $e_paid_c  = $emi ? (int)$emi['emi_paid_count']    : 0;
+            $e_pend_c  = $emi ? (int)$emi['emi_pending_count'] : 0;
+            $e_paid_a  = $emi ? (float)$emi['emi_paid']        : 0;
+            $e_pend_a  = $emi ? (float)$emi['emi_pending']     : 0;
           ?>
           <!-- Summary row (clickable) -->
           <tr class="<?= $is_cur ? 'table-primary' : '' ?> rpt-toggle-row"
@@ -499,17 +523,32 @@ function rpt_pay_badge(string $mode, ?string $last4 = null): string {
             <td class="<?= $m_pend > 0 ? 'text-warning fw-semibold' : 'text-muted' ?>">₹<?= number_format($m_pend, 0) ?></td>
             <td class="<?= $m_over > 0 ? 'text-danger fw-semibold' : 'text-muted' ?>">₹<?= number_format($m_over, 0) ?></td>
             <td>
+              <?php if ($e_paid_c > 0): ?>
+                <span class="fw-semibold text-success"><?= $e_paid_c ?> EMI</span>
+                <div class="text-muted" style="font-size:.73rem">₹<?= number_format($e_paid_a, 0) ?></div>
+              <?php else: ?>
+                <span class="text-muted" style="font-size:.8rem">—</span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <?php if ($e_pend_c > 0): ?>
+                <span class="fw-semibold" style="color:#856404"><?= $e_pend_c ?> EMI</span>
+                <div class="text-muted" style="font-size:.73rem">₹<?= number_format($e_pend_a, 0) ?></div>
+              <?php else: ?>
+                <span class="text-muted" style="font-size:.8rem">—</span>
+              <?php endif; ?>
+            </td>
+            <td>
               <div class="progress" style="height:7px;border-radius:4px">
                 <div class="progress-bar bg-success" style="width:<?= $mp_pct ?>%" title="Paid <?= $mp_pct ?>%"></div>
                 <div class="progress-bar bg-danger"  style="width:<?= $mo_pct ?>%" title="Overdue <?= $mo_pct ?>%"></div>
               </div>
               <div style="font-size:.72rem;color:#888;margin-top:2px"><?= $mp_pct ?>% paid</div>
             </td>
-            <td class="text-muted"><?= (int)$m['paid_count'] ?> / <?= (int)$m['total_count'] ?> paid</td>
           </tr>
           <!-- Detail collapse row -->
           <tr id="<?= $acc_id ?>" class="collapse">
-            <td colspan="8" class="p-0 border-0">
+            <td colspan="9" class="p-0 border-0">
               <div class="bg-light border-bottom border-top">
                 <table class="table table-sm mb-0">
                   <thead>
@@ -528,6 +567,11 @@ function rpt_pay_badge(string $mode, ?string $last4 = null): string {
                       <tr>
                         <td class="ps-4 fw-semibold">
                           <?= htmlspecialchars((string)($e['name'] ?? '')) ?>
+                          <?php if (!empty($e['auto_generated'])): ?>
+                            <span class="badge ms-1" style="font-size:.62rem;background:#6f42c1;color:#fff">
+                              <i class="fas fa-rotate me-1"></i>EMI
+                            </span>
+                          <?php endif; ?>
                           <?php if (!empty($e['notes'])): ?>
                             <div class="text-muted" style="font-size:.73rem">
                               <?= htmlspecialchars(strlen((string)$e['notes']) > 50 ? substr((string)$e['notes'], 0, 50).'…' : (string)$e['notes']) ?>

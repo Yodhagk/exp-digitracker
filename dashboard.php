@@ -7,8 +7,17 @@ $uid = $_SESSION['id'];
 // ── Summary stats ──────────────────────────────────────────
 $today = date('Y-m-d');
 
-// Total active loans & remaining amount
-$r = mysqli_query($conn, "SELECT COUNT(*) c, COALESCE(SUM(remaining_amount),0) amt FROM loans WHERE user_id=$uid AND status='active'");
+// Auto-mark: past-due EMIs → paid; regular expenses → overdue
+mysqli_query($conn, "UPDATE expenses SET status='paid'
+    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$today'");
+mysqli_query($conn, "UPDATE expenses SET status='overdue'
+    WHERE user_id=$uid AND auto_generated=0 AND status='pending' AND due_date < '$today'");
+// Auto-mark overdue loans
+mysqli_query($conn, "UPDATE loans SET status='overdue'
+    WHERE user_id=$uid AND status='active' AND due_date < '$today'");
+
+// Active + overdue loans (all non-paid) & total remaining
+$r = mysqli_query($conn, "SELECT COUNT(*) c, COALESCE(SUM(remaining_amount),0) amt FROM loans WHERE user_id=$uid AND status IN('active','overdue')");
 $loans_row = mysqli_fetch_assoc($r);
 
 // Pending expenses due in next 30 days
@@ -55,6 +64,26 @@ $months_exp = array_fill(0, 12, 0);
 $r = mysqli_query($conn, "SELECT MONTH(due_date) m, COALESCE(SUM(amount),0) total FROM expenses WHERE user_id=$uid AND YEAR(due_date)=$chart_year GROUP BY MONTH(due_date)");
 while ($row = mysqli_fetch_assoc($r)) $months_exp[(int)$row['m'] - 1] = (float)$row['total'];
 $year_total = array_sum($months_exp);
+
+// Loan EMI progress for active/overdue loans
+$emi_loans = [];
+$r = mysqli_query($conn, "
+    SELECT l.id, l.name, l.lender, l.monthly_payment, l.tenure_months,
+           l.status, l.remaining_amount,
+           COUNT(e.id)                                                       AS emi_total,
+           SUM(CASE WHEN e.status='paid'    THEN 1 ELSE 0 END)             AS emi_paid,
+           SUM(CASE WHEN e.status='pending' THEN 1 ELSE 0 END)             AS emi_pending,
+           SUM(CASE WHEN e.status='paid'    THEN e.amount ELSE 0 END)      AS emi_paid_amt,
+           SUM(CASE WHEN e.status='pending' THEN e.amount ELSE 0 END)      AS emi_pending_amt,
+           MIN(CASE WHEN e.status='pending' THEN e.due_date ELSE NULL END) AS next_emi_due
+    FROM loans l
+    LEFT JOIN expenses e ON e.loan_ref_id=l.id AND e.auto_generated=1 AND e.user_id=l.user_id
+    WHERE l.user_id=$uid AND l.status IN('active','overdue')
+    GROUP BY l.id, l.name, l.lender, l.monthly_payment, l.tenure_months,
+             l.status, l.remaining_amount
+    ORDER BY l.status='overdue' DESC, l.id ASC
+");
+while ($row = mysqli_fetch_assoc($r)) $emi_loans[] = $row;
 
 require_once 'includes/header.php';
 
@@ -209,6 +238,103 @@ function due_badge($days, $status='') {
     </div>
   </div>
 </div>
+
+<!-- ── Loan EMI Status ── -->
+<?php if (!empty($emi_loans)): ?>
+<div class="row g-3 mt-1">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <h6 class="card-title">
+          <i class="fas fa-rotate me-2" style="color:#6f42c1"></i>Loan EMI Status
+        </h6>
+        <a href="loans.php" class="btn btn-sm btn-outline-secondary">View All Loans</a>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-wrapper">
+          <table class="table mb-0">
+            <thead>
+              <tr>
+                <th>Loan</th>
+                <th>Lender</th>
+                <th>Monthly EMI</th>
+                <th style="min-width:130px">EMI Progress</th>
+                <th>EMI Closed</th>
+                <th>EMI Pending</th>
+                <th>Next Due</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($emi_loans as $el):
+                $el_total    = (int)$el['emi_total'];
+                $el_paid     = (int)$el['emi_paid'];
+                $el_pending  = (int)$el['emi_pending'];
+                $el_paid_amt = (float)$el['emi_paid_amt'];
+                $el_pend_amt = (float)$el['emi_pending_amt'];
+                $el_pct      = $el_total > 0 ? round(($el_paid / $el_total) * 100) : 0;
+                $next_due    = $el['next_emi_due'];
+                $next_days   = $next_due ? days_until($next_due) : null;
+              ?>
+              <tr>
+                <td class="fw-semibold"><?= htmlspecialchars($el['name']) ?></td>
+                <td class="text-muted"><?= htmlspecialchars($el['lender'] ?? '—') ?></td>
+                <td class="fw-bold">₹<?= number_format((float)$el['monthly_payment'], 0) ?></td>
+                <td>
+                  <?php if ($el_total > 0): ?>
+                    <div class="d-flex align-items-center gap-2">
+                      <div class="progress flex-grow-1" style="height:7px;border-radius:4px;min-width:70px">
+                        <div class="progress-bar bg-success" style="width:<?= $el_pct ?>%"></div>
+                      </div>
+                      <span style="font-size:.78rem;color:#555;white-space:nowrap"><?= $el_paid ?>/<?= $el_total ?></span>
+                    </div>
+                    <div style="font-size:.72rem;color:#888;margin-top:2px"><?= $el_pct ?>% complete</div>
+                  <?php else: ?>
+                    <span class="text-muted" style="font-size:.8rem">No schedule set</span>
+                  <?php endif; ?>
+                </td>
+                <td>
+                  <?php if ($el_paid > 0): ?>
+                    <span class="fw-semibold text-success"><?= $el_paid ?> EMI</span>
+                    <div class="text-muted" style="font-size:.73rem">₹<?= number_format($el_paid_amt, 0) ?></div>
+                  <?php else: ?>
+                    <span class="text-muted">—</span>
+                  <?php endif; ?>
+                </td>
+                <td>
+                  <?php if ($el_pending > 0): ?>
+                    <span class="fw-semibold" style="color:#856404"><?= $el_pending ?> EMI</span>
+                    <div class="text-muted" style="font-size:.73rem">₹<?= number_format($el_pend_amt, 0) ?></div>
+                  <?php elseif ($el_total > 0): ?>
+                    <span class="badge bg-success" style="font-size:.75rem">All Closed!</span>
+                  <?php else: ?>
+                    <span class="text-muted">—</span>
+                  <?php endif; ?>
+                </td>
+                <td>
+                  <?php if ($next_due): ?>
+                    <div><?= date('d M Y', strtotime($next_due)) ?></div>
+                    <?= due_badge($next_days) ?>
+                  <?php else: ?>
+                    <span class="text-muted">—</span>
+                  <?php endif; ?>
+                </td>
+                <td>
+                  <?php
+                    $s_map = ['active' => 'badge-active', 'overdue' => 'badge-overdue'];
+                    echo '<span class="badge-status '.($s_map[$el['status']] ?? '').'">'.$el['status'].'</span>';
+                  ?>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <!-- ── Monthly Expense Chart ── -->
 <div class="row g-3 mt-1">

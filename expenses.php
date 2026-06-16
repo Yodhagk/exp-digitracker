@@ -94,9 +94,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $msg = $_GET['msg'] ?? '';
 
-// Auto-overdue
+// Auto-mark: past-due EMIs → paid (they debit automatically); regular expenses → overdue
+mysqli_query($conn, "UPDATE expenses SET status='paid'
+    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$today'");
 mysqli_query($conn, "UPDATE expenses SET status='overdue'
-    WHERE user_id=$uid AND status='pending' AND due_date < '$today'");
+    WHERE user_id=$uid AND auto_generated=0 AND status='pending' AND due_date < '$today'");
 
 $filter = $_GET['status'] ?? 'all';
 $where  = $filter !== 'all'

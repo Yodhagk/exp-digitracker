@@ -1,0 +1,50 @@
+name: Deploy DigiTracker
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: 'Run pending SQL migrations'
+        required: false
+        default: 'true'
+        type: boolean
+
+jobs:
+  deploy:
+    name: Deploy to Production (192.168.1.138)
+    runs-on: [self-hosted, digitracker-prod]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Show deploying commit
+        run: |
+          echo "Deploying commit: $(git log -1 --pretty='%h %s' HEAD)"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Triggered by: $GITHUB_ACTOR"
+
+      - name: Deploy PHP app files
+        run: bash scripts/deploy-app.sh
+
+      - name: Run pending migrations
+        if: ${{ github.event.inputs.run_migrations != 'false' }}
+        run: bash scripts/run-migrations.sh
+
+      - name: Reload Apache
+        run: sudo systemctl reload apache2
+
+      - name: Run health check
+        run: /var/app/script/healthcheck.sh
+
+      - name: Smoke test
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
+          echo "HTTP $code"
+          [ "$code" -eq 200 ] || [ "$code" -eq 302 ] || { echo "Smoke test FAILED: HTTP $code"; exit 1; }
+          echo "Smoke test PASSED"

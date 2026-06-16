@@ -181,9 +181,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $msg = $_GET['msg'] ?? '';
 
-// Auto-mark overdue
+// Auto-mark overdue loans
 mysqli_query($conn, "UPDATE loans SET status='overdue'
     WHERE user_id=$uid AND status='active' AND due_date < '$today'");
+// Auto-mark past-due EMI expenses as paid (EMIs auto-debit on schedule)
+mysqli_query($conn, "UPDATE expenses SET status='paid'
+    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$today'");
 
 // Fetch loans with EMI count
 $filter = $_GET['status'] ?? 'all';
