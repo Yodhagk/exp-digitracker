@@ -427,6 +427,7 @@ a { color: var(--primary); }
   border-color: var(--border) !important;
 }
 .bg-white { background-color: var(--card-bg-alt) !important; }
+.bg-light:not(.badge) { background-color: var(--card-bg-alt) !important; color: var(--text) !important; }
 .text-dark { color: var(--text) !important; }
 
 /* ── Action buttons ────────────────────────────────── */

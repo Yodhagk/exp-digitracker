@@ -48,6 +48,54 @@ function generate_emi_schedule(
     return $count;
 }
 
+// ── Real amortization (reducing-balance) math ─────────────────
+// The mathematically correct EMI for a principal fully repaid over $tenure_months
+// at $annual_rate (%), via the standard reducing-balance formula.
+function calc_emi(float $principal, float $annual_rate, int $tenure_months): float {
+    if ($tenure_months <= 0 || $principal <= 0) return 0.0;
+    $r = $annual_rate / 12 / 100;
+    if ($r <= 0) return round($principal / $tenure_months, 2);
+    $factor = (1 + $r) ** $tenure_months;
+    return round($principal * $r * $factor / ($factor - 1), 2);
+}
+
+// Walks the loan forward one month at a time, splitting each payment into
+// interest (on the outstanding balance) and principal — unlike a flat
+// "balance -= emi_amount", which ignores interest entirely and understates
+// how much principal is actually left. Returns:
+//   clears              — false if $monthly_payment doesn't even cover the
+//                          interest, so the balance would grow forever
+//   months_to_clear     — total months for the loan to reach zero at this rate/payment
+//   total_interest      — total interest payable over the life of the loan
+//   balance_after_paid  — real outstanding principal after $emis_paid actual payments
+function amortize_loan(float $principal, float $annual_rate, float $monthly_payment, int $emis_paid = 0): array {
+    $r       = $annual_rate / 12 / 100;
+    $balance = $principal;
+    $months  = 0;
+    $total_interest     = 0.0;
+    $balance_after_paid = $principal;
+
+    while ($balance > 0.5 && $months < 1200) { // 100-year safety cap
+        $interest  = $balance * $r;
+        $principal_paid = $monthly_payment - $interest;
+        if ($principal_paid <= 0) {
+            return ['clears' => false, 'months_to_clear' => null, 'total_interest' => null, 'balance_after_paid' => null];
+        }
+        $balance = max(0, $balance - $principal_paid);
+        $total_interest += $interest;
+        $months++;
+        if ($months === $emis_paid) $balance_after_paid = $balance;
+    }
+    if ($emis_paid >= $months) $balance_after_paid = 0.0;
+
+    return [
+        'clears'             => true,
+        'months_to_clear'    => $months,
+        'total_interest'     => round($total_interest, 2),
+        'balance_after_paid' => round($balance_after_paid, 2),
+    ];
+}
+
 // ── Handle POST ──────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -216,10 +264,58 @@ $result = mysqli_query($conn,
     "SELECT l.*,
         (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1) AS emi_total,
         (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1 AND e.status='paid') AS emi_paid,
+        (SELECT COUNT(*) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1 AND e.due_date <= '$today') AS emi_due_by_today,
         (SELECT MIN(e.due_date) FROM expenses e WHERE e.loan_ref_id=l.id AND e.auto_generated=1 AND e.status='pending') AS next_emi_date
      FROM loans l
      WHERE l.user_id=$uid $where ORDER BY l.due_date ASC");
 $loans = mysqli_fetch_all($result, MYSQLI_ASSOC);
+
+// ── Real clearance analysis per loan (amortization, not naive subtraction) ──
+$clearance = [];
+foreach ($loans as $l) {
+    $principal = (float)($l['principal_amount'] ?? 0);
+    $rate      = (float)($l['interest_rate'] ?? 0);
+    $monthly   = (float)($l['monthly_payment'] ?? 0);
+    $tracked   = (float)($l['remaining_amount'] ?? 0);
+    $paid      = (int)$l['emi_paid'];
+    $due       = (int)$l['emi_due_by_today'];
+    if ($monthly <= 0 || $l['status'] === 'paid') continue;
+
+    // principal_amount is an optional field on this form — plenty of existing loans
+    // never had it recorded. Full history (drift check + EMI check) needs it; without
+    // it, fall back to projecting forward from today's tracked balance instead, which
+    // still gives a real payoff date rather than none at all.
+    $has_principal = $principal > 0;
+    $basis         = $has_principal ? $principal : $tracked;
+    if ($basis <= 0) continue;
+    $emis_elapsed  = $has_principal ? $paid : 0;
+
+    $amort  = amortize_loan($basis, $rate, $monthly, $emis_elapsed);
+    $missed = max(0, $due - $paid);
+    $calc_emi_val = ($has_principal && $l['tenure_months'])
+        ? calc_emi($principal, $rate, (int)$l['tenure_months']) : null;
+
+    $payoff_date = null;
+    if ($amort['clears']) {
+        // With full history, project from the loan's actual start date; without a
+        // recorded principal there's no reliable start point, so project from today.
+        $anchor = $has_principal && $l['start_date'] ? $l['start_date'] : $today;
+        $payoff_date = (new DateTime($anchor))->modify('+' . $amort['months_to_clear'] . ' months')->format('Y-m-d');
+    }
+
+    $clearance[$l['id']] = [
+        'has_principal' => $has_principal,
+        'missed'        => $missed,
+        'calc_emi'      => $calc_emi_val,
+        'emi_mismatch'  => $calc_emi_val !== null && abs($calc_emi_val - $monthly) > max(5, $monthly * 0.02),
+        'real_balance'  => $amort['clears'] ? $amort['balance_after_paid'] : null,
+        'tracked_balance' => $tracked,
+        'balance_drift' => ($amort['clears'] && $has_principal) ? round($tracked - $amort['balance_after_paid'], 2) : null,
+        'payoff_date'   => $payoff_date,
+        'clears'        => $amort['clears'],
+        'total_interest'=> $amort['total_interest'],
+    ];
+}
 
 // Upcoming monthly EMI totals (next 6 months of pending EMIs across all loans)
 $upcoming_r = mysqli_query($conn,
@@ -464,6 +560,92 @@ function tenure_label(?int $months, int $emi_paid = 0, int $emi_total = 0): stri
     </div>
     <div class="text-muted mt-2" style="font-size:.75rem;">
       <i class="fas fa-info-circle me-1"></i>Showing next 6 months of pending EMIs across all active loans.
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
+<!-- ── Real Clearance Analysis (reducing-balance amortization) ─── -->
+<?php if (!empty($clearance)): ?>
+<div class="card mt-3">
+  <div class="card-header">
+    <h6 class="card-title mb-0">
+      <i class="fas fa-calculator me-2 text-info"></i>Loan Clearance Analysis
+    </h6>
+    <span class="text-muted" style="font-size:.78rem;">Interest-adjusted balance &amp; payoff date, not a flat EMI subtraction</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-wrapper">
+      <table class="table mb-0">
+        <thead>
+          <tr>
+            <th>Loan</th>
+            <th>Payments Due vs Confirmed</th>
+            <th>EMI Check</th>
+            <th>Real Remaining Balance</th>
+            <th>Tracked Balance</th>
+            <th>Real Payoff Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($loans as $l): if (empty($clearance[$l['id']])) continue;
+            $c = $clearance[$l['id']];
+          ?>
+          <tr>
+            <td class="fw-semibold"><?= htmlspecialchars($l['name']) ?></td>
+            <td>
+              <?php if ($c['missed'] > 0): ?>
+                <span class="badge-status badge-overdue">
+                  <i class="fas fa-triangle-exclamation me-1"></i><?= $c['missed'] ?> unconfirmed
+                </span>
+              <?php else: ?>
+                <span class="badge-status badge-paid"><i class="fas fa-circle-check me-1"></i>Up to date</span>
+              <?php endif; ?>
+              <div class="text-muted mt-1" style="font-size:.74rem;"><?= (int)$l['emi_due_by_today'] ?> due · <?= (int)$l['emi_paid'] ?> confirmed</div>
+            </td>
+            <td>
+              <?php if ($c['calc_emi'] === null): ?>
+                <span class="text-muted">—</span>
+              <?php elseif ($c['emi_mismatch']): ?>
+                <span class="badge-status badge-pending" title="Entered EMI does not match principal/rate/tenure">
+                  <i class="fas fa-circle-exclamation me-1"></i>₹<?= number_format($c['calc_emi'], 0) ?> expected
+                </span>
+              <?php else: ?>
+                <span class="badge-status badge-active"><i class="fas fa-circle-check me-1"></i>Matches</span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <?php if (!$c['clears']): ?>
+                <span class="text-danger fw-semibold" title="Monthly payment does not cover interest — balance will never clear">
+                  <i class="fas fa-exclamation-triangle me-1"></i>Never clears
+                </span>
+              <?php else: ?>
+                <span class="fw-bold">₹<?= number_format($c['real_balance'], 0) ?></span>
+                <?php if (!$c['has_principal']): ?>
+                  <div class="text-muted" style="font-size:.72rem;">projected from today — no principal on record</div>
+                <?php elseif ($c['balance_drift'] !== null && abs($c['balance_drift']) > max(50, $c['real_balance'] * 0.01)): ?>
+                  <div style="font-size:.74rem;" class="text-<?= $c['balance_drift'] > 0 ? 'danger' : 'warning' ?>">
+                    <?= $c['balance_drift'] > 0 ? 'Tracked is ₹' . number_format($c['balance_drift'], 0) . ' higher' : 'Tracked is ₹' . number_format(abs($c['balance_drift']), 0) . ' lower' ?>
+                  </div>
+                <?php endif; ?>
+              <?php endif; ?>
+            </td>
+            <td class="text-muted">₹<?= number_format($c['tracked_balance'], 0) ?></td>
+            <td>
+              <?= $c['payoff_date'] ? date('M Y', strtotime($c['payoff_date'])) : '<span class="text-muted">—</span>' ?>
+            </td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <div class="text-muted p-3 pt-2" style="font-size:.75rem;border-top:1px solid var(--border);">
+      <i class="fas fa-info-circle me-1"></i>
+      "Real Remaining Balance" applies interest to the outstanding principal each month before
+      counting the payment toward principal — the "Tracked Balance" field is only ever moved by
+      subtracting the full EMI, which overstates how much principal has actually been repaid on
+      any interest-bearing loan. "Payments Due vs Confirmed" counts EMI due dates that have passed
+      without an explicit paid confirmation — see the Expenses schedule grid to confirm them.
     </div>
   </div>
 </div>
