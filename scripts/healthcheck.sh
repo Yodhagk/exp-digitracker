@@ -80,8 +80,13 @@ else
     DB_CHECK=$(sudo -n mysql -sN "$DB_NAME" -e "SELECT COUNT(*) FROM users;" 2>/dev/null || echo "")
     if [[ -n "$DB_CHECK" && "$DB_CHECK" =~ ^[0-9]+$ ]]; then
         ok "DB reachable via root socket (${DB_NAME} — ${DB_CHECK} users; app-user creds not readable by $(whoami))"
+    elif sudo -n true 2>/dev/null; then
+        # We *can* escalate, so a failure here is a real DB problem.
+        fail "DB ${DB_NAME} unreachable via root socket"
     else
-        fail "DB ${DB_NAME} unreachable (and ${ENV_FILE} not readable by $(whoami))"
+        # No file access and no passwordless sudo: this is a limitation of the
+        # invoking user, not evidence the DB is down — don't report it as critical.
+        warn "DB check skipped: $(whoami) can't read ${ENV_FILE} and has no passwordless sudo (run with sudo for the full check)"
     fi
 fi
 
