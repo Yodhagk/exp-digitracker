@@ -7,6 +7,16 @@ $current_page = basename($_SERVER['PHP_SELF']);
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><?= htmlspecialchars($page_title ?? 'DigiTracker') ?> – DigiTracker</title>
+  <script>
+    // Runs before the stylesheet loads so the saved theme applies on first
+    // paint instead of flashing dark-then-light (or vice versa).
+    (function () {
+      try {
+        var t = localStorage.getItem('digitracker-theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="css/style.css">
@@ -69,6 +79,9 @@ $current_page = basename($_SERVER['PHP_SELF']);
     </button>
     <div class="nav-title"><?= htmlspecialchars($page_title ?? 'Dashboard') ?></div>
     <div class="nav-right">
+      <button class="sidebar-toggle" id="theme-toggle" title="Toggle light/dark theme">
+        <i class="fas fa-moon"></i>
+      </button>
       <span class="nav-secure"><span class="status-dot"></span>Secure Session</span>
       <span class="nav-date"><i class="fas fa-calendar me-1"></i><?= date('D, M j Y') ?></span>
       <a href="logout.php" class="btn btn-sm btn-outline-danger ms-2">

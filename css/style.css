@@ -1,5 +1,6 @@
 /* DigiTracker – Main Stylesheet
-   Theme: tactical / command-center dark UI */
+   Theme: tactical / command-center UI, with dark (default) and light modes.
+   See the ":root[data-theme=light]" block below for the light palette. */
 
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
@@ -42,9 +43,42 @@
   --font-display: 'Orbitron', 'Segoe UI', sans-serif;
 }
 
+/* ── Light theme ───────────────────────────────────────
+   Toggled via <html data-theme="light">, set by the inline script in
+   includes/header.php (and login/register/index) and the toggle button in
+   the top nav. The sidebar stays dark in both themes — a dark sidebar next
+   to a light content area is deliberate, not a gap in coverage. Accent
+   colors below (--primary/--success/--danger/--warning/--purple) are
+   darkened versions of the dark-theme neon hues, chosen for real contrast
+   against a light background, not the same values dimmed. */
+:root[data-theme="light"] {
+  --primary: #0969da;
+  --primary-dark: #075198;
+  --primary-ink: #ffffff;
+  --success: #1a7f37;
+  --success-ink: #ffffff;
+  --danger: #cf222e;
+  --warning: #9a6700;
+  --info: #0969da;
+  --purple: #6639ba;
+
+  --bg: #eef2f6;
+  --card-bg: #ffffff;
+  --card-bg-alt: #f6f8fa;
+  --input-bg: #ffffff;
+  --text: #1b2733;
+  --text-muted: #57687a;
+  --border: #d7dee5;
+  --border-soft: rgba(9,105,218,.18);
+
+  --shadow: 0 1px 2px rgba(16,24,32,.06), 0 1px 3px rgba(16,24,32,.08);
+  --shadow-md: 0 8px 24px rgba(16,24,32,.12), 0 0 0 1px rgba(9,105,218,.08);
+}
+
 /* ── Reset / Base ──────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
 body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background-color: var(--bg);
@@ -55,6 +89,11 @@ body {
   background-attachment: fixed;
   color: var(--text);
   line-height: 1.6;
+}
+:root[data-theme="light"] body {
+  background-image:
+    linear-gradient(rgba(9,105,218,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(9,105,218,.05) 1px, transparent 1px);
 }
 ::selection { background: rgba(0,194,255,.3); color: #fff; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -235,7 +274,7 @@ a { color: var(--primary); }
   line-height: 1;
   transition: background .15s, color .15s;
 }
-.sidebar-toggle:hover { background: var(--sidebar-hover); color: var(--primary); }
+.sidebar-toggle:hover { background: var(--card-bg-alt); color: var(--primary); }
 
 .nav-title {
   font-family: var(--font-display);
@@ -468,17 +507,17 @@ a { color: var(--primary); }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn-danger:hover, .btn-danger:focus { background: #e42d40; border-color: #e42d40; }
 .btn-secondary { background: transparent; border-color: var(--border); color: var(--text-muted); }
-.btn-secondary:hover { background: var(--sidebar-hover); color: #fff; border-color: var(--border); }
+.btn-secondary:hover { background: var(--card-bg-alt); color: var(--text); border-color: var(--border); }
 
 .btn-outline-primary { color: var(--primary); border-color: var(--primary); }
 .btn-outline-primary:hover { background: var(--primary); color: var(--primary-ink); }
 .btn-outline-secondary { color: var(--text-muted); border-color: var(--border); background: transparent; }
-.btn-outline-secondary:hover { background: var(--sidebar-hover); color: var(--text); border-color: var(--border-soft); }
+.btn-outline-secondary:hover { background: var(--card-bg-alt); color: var(--text); border-color: var(--border-soft); }
 .btn-outline-danger { color: var(--danger); border-color: var(--danger); }
 .btn-outline-danger:hover { background: var(--danger); color: #fff; }
 
 .btn-check:checked + .btn-outline-secondary,
-.btn.active.btn-outline-secondary { background: var(--sidebar-hover); color: var(--text); }
+.btn.active.btn-outline-secondary { background: var(--card-bg-alt); color: var(--text); }
 
 .form-label {
   font-family: var(--font-mono);
@@ -507,7 +546,7 @@ a { color: var(--primary); }
   color: var(--text);
 }
 .form-control::placeholder { color: var(--text-muted); opacity: .65; }
-.form-control:disabled, .form-control[readonly] { background: #050a0d; color: var(--text-muted); }
+.form-control:disabled, .form-control[readonly] { background: var(--card-bg-alt); color: var(--text-muted); }
 .form-check-input { background-color: var(--input-bg); border-color: var(--border); }
 .form-check-input:checked { background-color: var(--primary); border-color: var(--primary); }
 .form-check-label { color: var(--text); }

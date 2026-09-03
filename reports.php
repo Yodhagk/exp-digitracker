@@ -690,9 +690,10 @@ $extra_js = <<<EOT
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 (function () {
-  // Dark-theme defaults so axis/legend text and gridlines stay readable on dark cards
-  Chart.defaults.color = '#8fa3b0';
-  Chart.defaults.borderColor = 'rgba(255,255,255,.08)';
+  // Theme-aware defaults so axis/legend text and gridlines stay readable in both themes
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  Chart.defaults.color = isLight ? '#57687a' : '#8fa3b0';
+  Chart.defaults.borderColor = isLight ? 'rgba(16,24,32,.1)' : 'rgba(255,255,255,.08)';
 
   // ── Stacked bar chart ──────────────────────────────────────
   const ctx1 = document.getElementById('monthlyChart');

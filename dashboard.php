@@ -371,8 +371,9 @@ $extra_js = <<<JS
   const labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const ctx = document.getElementById('expenseChart');
   if (!ctx) return;
-  Chart.defaults.color = '#8fa3b0';
-  Chart.defaults.borderColor = 'rgba(255,255,255,.08)';
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  Chart.defaults.color = isLight ? '#57687a' : '#8fa3b0';
+  Chart.defaults.borderColor = isLight ? 'rgba(16,24,32,.1)' : 'rgba(255,255,255,.08)';
   new Chart(ctx, {
     type: 'bar',
     data: {
