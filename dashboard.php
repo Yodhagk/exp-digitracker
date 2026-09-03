@@ -371,6 +371,8 @@ $extra_js = <<<JS
   const labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const ctx = document.getElementById('expenseChart');
   if (!ctx) return;
+  Chart.defaults.color = '#8fa3b0';
+  Chart.defaults.borderColor = 'rgba(255,255,255,.08)';
   new Chart(ctx, {
     type: 'bar',
     data: {
@@ -378,11 +380,11 @@ $extra_js = <<<JS
       datasets: [{
         label: 'Expenses (₹)',
         data: data,
-        backgroundColor: 'rgba(59,130,246,.25)',
-        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(0,194,255,.25)',
+        borderColor: '#00c2ff',
         borderWidth: 2,
         borderRadius: 6,
-        hoverBackgroundColor: 'rgba(59,130,246,.45)'
+        hoverBackgroundColor: 'rgba(0,194,255,.45)'
       }]
     },
     options: {

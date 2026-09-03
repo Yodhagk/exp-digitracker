@@ -17,15 +17,15 @@ $current_page = basename($_SERVER['PHP_SELF']);
 <nav class="sidebar" id="sidebar">
   <div class="sidebar-header">
     <a href="dashboard.php" class="sidebar-logo">
-      <i class="fas fa-wallet"></i>
+      <i class="fas fa-shield-halved"></i>
       <span>DigiTracker</span>
     </a>
   </div>
   <div class="sidebar-user">
-    <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
+    <div class="user-avatar"><i class="fas fa-user-shield"></i></div>
     <div class="user-info">
       <span class="user-name"><?= htmlspecialchars($_SESSION['username']) ?></span>
-      <span class="user-role">Personal Finance</span>
+      <span class="user-role"><span class="status-dot"></span>Clearance: Admin</span>
     </div>
   </div>
   <ul class="sidebar-menu">
@@ -69,6 +69,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     </button>
     <div class="nav-title"><?= htmlspecialchars($page_title ?? 'Dashboard') ?></div>
     <div class="nav-right">
+      <span class="nav-secure"><span class="status-dot"></span>Secure Session</span>
       <span class="nav-date"><i class="fas fa-calendar me-1"></i><?= date('D, M j Y') ?></span>
       <a href="logout.php" class="btn btn-sm btn-outline-danger ms-2">
         <i class="fas fa-right-from-bracket me-1"></i>Logout

@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <!-- Left panel -->
   <div class="auth-left">
     <div class="auth-left-logo">
-      <i class="fas fa-wallet"></i>
+      <i class="fas fa-shield-halved"></i>
       <span>DigiTracker</span>
     </div>
     <ul class="auth-feature-list">

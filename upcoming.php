@@ -220,10 +220,10 @@ function pct_bar(int $paid, int $total): int {
 
 <?php
 $section_cfg = [
-  'overdue' => ['title'=>'Overdue — Immediate Attention', 'icon'=>'circle-exclamation', 'color'=>'#ef4444', 'border'=>'border-danger'],
-  'week'    => ['title'=>'Due This Week',                 'icon'=>'clock',              'color'=>'#f59e0b', 'border'=>'border-warning'],
-  'month'   => ['title'=>'Due This Month',                'icon'=>'calendar-days',      'color'=>'#3b82f6', 'border'=>'border-primary'],
-  'later'   => ['title'=>'Upcoming (Beyond 30 Days)',     'icon'=>'forward',            'color'=>'#10b981', 'border'=>'border-success'],
+  'overdue' => ['title'=>'Overdue — Immediate Attention', 'icon'=>'circle-exclamation', 'color'=>'#ff3b4e', 'border'=>'border-danger'],
+  'week'    => ['title'=>'Due This Week',                 'icon'=>'clock',              'color'=>'#ffb020', 'border'=>'border-warning'],
+  'month'   => ['title'=>'Due This Month',                'icon'=>'calendar-days',      'color'=>'#00c2ff', 'border'=>'border-primary'],
+  'later'   => ['title'=>'Upcoming (Beyond 30 Days)',     'icon'=>'forward',            'color'=>'#00e676', 'border'=>'border-success'],
 ];
 
 foreach ($section_cfg as $bk => $sc):
@@ -245,14 +245,14 @@ foreach ($section_cfg as $bk => $sc):
       $is_bulk = $grp['emi_pending_cnt'] > 5;
       $entry0  = $grp['entries'][0];
     ?>
-    <div class="border rounded mb-3 overflow-hidden" style="border-color:rgba(59,130,246,.3)!important;">
+    <div class="border rounded mb-3 overflow-hidden" style="border-color:rgba(0,194,255,.3)!important;">
 
       <!-- Loan header row -->
       <div class="d-flex align-items-center px-3 py-2 flex-wrap gap-2"
-           style="background:rgba(59,130,246,.06);">
+           style="background:rgba(0,194,255,.06);">
         <div class="d-flex align-items-center gap-2 flex-grow-1">
           <div class="rounded-circle d-flex align-items-center justify-content-center text-white flex-shrink-0"
-               style="width:36px;height:36px;background:#3b82f6;font-size:.85rem;">
+               style="width:36px;height:36px;background:#00c2ff;font-size:.85rem;">
             <i class="fas fa-hand-holding-dollar"></i>
           </div>
           <div>
@@ -280,7 +280,7 @@ foreach ($section_cfg as $bk => $sc):
       </div>
 
       <!-- Progress bar -->
-      <div class="px-3 pt-2 pb-1" style="background:#fff;">
+      <div class="px-3 pt-2 pb-1" style="background:var(--card-bg-alt);">
         <div class="d-flex justify-content-between mb-1" style="font-size:.72rem;">
           <span class="text-success fw-semibold"><?= $grp['emi_paid'] ?> paid (<?= $pct ?>%)</span>
           <span class="text-warning fw-semibold"><?= $grp['emi_pending_cnt'] ?> left · <?= fmt($grp['emi_pending_total']) ?> total due</span>
@@ -293,7 +293,7 @@ foreach ($section_cfg as $bk => $sc):
       <!-- EMI entry rows -->
       <?php foreach ($grp['entries'] as $idx => $entry): ?>
       <div class="d-flex align-items-center flex-wrap gap-2 px-3 py-2 border-top"
-           style="background:<?= $idx%2===0?'#fff':'#fafafa' ?>;">
+           style="background:<?= $idx%2===0?'var(--card-bg)':'var(--card-bg-alt)' ?>;">
         <div class="flex-grow-1">
           <div class="fw-semibold" style="font-size:.85rem;">
             <?= htmlspecialchars($entry['emi_name']) ?>
@@ -304,7 +304,7 @@ foreach ($section_cfg as $bk => $sc):
             <?= days_text($entry['days']) ?>
           </div>
         </div>
-        <div class="fw-bold text-dark" style="font-size:1rem;"><?= fmt((float)$entry['amount']) ?></div>
+        <div class="fw-bold" style="font-size:1rem;"><?= fmt((float)$entry['amount']) ?></div>
         <button class="btn btn-success btn-sm"
                 onclick='openPayModal(<?= $entry['id'] ?>,
                   <?= json_encode($entry['emi_name']) ?>,
@@ -320,7 +320,7 @@ foreach ($section_cfg as $bk => $sc):
       <?php endforeach; ?>
 
       <?php if ($grp['emi_pending_cnt'] > $grp['shown_future'] && !$is_bulk): ?>
-      <div class="px-3 py-2 text-muted border-top" style="font-size:.78rem;background:#f9fafb;">
+      <div class="px-3 py-2 text-muted border-top" style="font-size:.78rem;background:var(--card-bg-alt);">
         <i class="fas fa-info-circle me-1"></i>
         +<?= $grp['emi_pending_cnt'] - count($grp['entries']) ?> more pending EMIs not shown
         (<?= fmt(($grp['emi_pending_cnt'] - count($grp['entries'])) * $grp['loan_monthly']) ?> upcoming)
@@ -333,7 +333,7 @@ foreach ($section_cfg as $bk => $sc):
       $is_inv = ($item['_type'] === 'invoice');
     ?>
     <div class="d-flex align-items-center flex-wrap gap-2 border rounded px-3 py-2 mb-2"
-         style="background:#fff;">
+         style="background:var(--card-bg-alt);">
       <!-- Icon -->
       <div class="rounded-circle d-flex align-items-center justify-content-center text-white flex-shrink-0"
            style="width:34px;height:34px;background:<?= $is_inv?'#b45309':'#059669' ?>;font-size:.8rem;">
@@ -391,8 +391,8 @@ foreach ($section_cfg as $bk => $sc):
 <!-- ── Warranty section ───────────────────────────────────────────── -->
 <?php if (!empty($warranties)): ?>
 <div class="card mt-2">
-  <div class="card-header" style="border-left:4px solid #8b5cf6;">
-    <h6 class="card-title mb-0" style="color:#8b5cf6;">
+  <div class="card-header" style="border-left:4px solid #7c5cff;">
+    <h6 class="card-title mb-0" style="color:#7c5cff;">
       <i class="fas fa-shield-halved me-2"></i>Warranty Expiry
       <a href="warranties.php" class="btn btn-sm btn-outline-secondary ms-2" style="font-size:.75rem;">Manage</a>
     </h6>
@@ -408,7 +408,7 @@ foreach ($section_cfg as $bk => $sc):
       ?>
       <div class="col-sm-6 col-md-4">
         <div class="border rounded p-2 d-flex align-items-center gap-2"
-             style="border-color:var(--bs-<?= $wc ?>)!important;background:var(--bs-<?= $wc ?>-bg-subtle,#fff);">
+             style="border-color:var(--bs-<?= $wc ?>)!important;background:rgba(var(--bs-<?= $wc ?>-rgb),.08);">
           <div class="rounded-circle d-flex align-items-center justify-content-center text-<?= $wc ?>"
                style="width:34px;height:34px;background:rgba(var(--bs-<?= $wc ?>-rgb),.1);flex-shrink:0;font-size:.8rem;">
             <i class="fas fa-shield-halved"></i>

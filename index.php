@@ -15,12 +15,12 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body style="background:#fff;">
+<body>
 
 <!-- ── Navbar ── -->
 <nav class="landing-nav">
   <a href="index.php" class="landing-nav-logo">
-    <i class="fas fa-wallet"></i>
+    <i class="fas fa-shield-halved"></i>
     DigiTracker
   </a>
   <div class="d-flex gap-2">
@@ -58,7 +58,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
       <div class="col-md-6 col-lg-3">
         <div class="feature-card">
-          <div class="feature-icon" style="background:rgba(59,130,246,.1);color:#3b82f6;">
+          <div class="feature-icon" style="background:rgba(0,194,255,.12);color:#00c2ff;">
             <i class="fas fa-hand-holding-dollar"></i>
           </div>
           <h5>Loans</h5>
@@ -68,7 +68,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
       <div class="col-md-6 col-lg-3">
         <div class="feature-card">
-          <div class="feature-icon" style="background:rgba(16,185,129,.1);color:#10b981;">
+          <div class="feature-icon" style="background:rgba(0,230,118,.12);color:#00e676;">
             <i class="fas fa-receipt"></i>
           </div>
           <h5>Expenses</h5>
@@ -78,7 +78,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
       <div class="col-md-6 col-lg-3">
         <div class="feature-card">
-          <div class="feature-icon" style="background:rgba(245,158,11,.1);color:#f59e0b;">
+          <div class="feature-icon" style="background:rgba(255,176,32,.12);color:#ffb020;">
             <i class="fas fa-file-invoice-dollar"></i>
           </div>
           <h5>Invoices</h5>
@@ -88,7 +88,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 
       <div class="col-md-6 col-lg-3">
         <div class="feature-card">
-          <div class="feature-icon" style="background:rgba(139,92,246,.1);color:#8b5cf6;">
+          <div class="feature-icon" style="background:rgba(124,92,255,.12);color:#7c5cff;">
             <i class="fas fa-shield-halved"></i>
           </div>
           <h5>Warranties</h5>
@@ -125,7 +125,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
 </section>
 
 <!-- ── How it works ── -->
-<section class="features-section" style="background:#f8fafc;">
+<section class="features-section" style="background:var(--card-bg);">
   <div class="container">
     <div class="text-center">
       <span class="section-tag">Simple Workflow</span>
@@ -135,7 +135,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
     <div class="row g-4 align-items-center">
       <div class="col-md-4">
         <div class="d-flex gap-16 align-items-start" style="gap:16px;">
-          <div class="feature-icon flex-shrink-0" style="background:#0f172a;color:#fff;width:48px;height:48px;font-size:1.1rem;border-radius:12px;display:flex;align-items:center;justify-content:center;">1</div>
+          <div class="feature-icon flex-shrink-0" style="background:var(--primary);color:var(--primary-ink);width:48px;height:48px;font-size:1.1rem;border-radius:8px;display:flex;align-items:center;justify-content:center;">1</div>
           <div>
             <h5 class="fw-bold mb-1" style="font-size:.97rem;">Create an Account</h5>
             <p class="text-muted mb-0" style="font-size:.88rem;">Register with your username and password. Your data stays private and linked only to your account.</p>
@@ -144,7 +144,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
       </div>
       <div class="col-md-4">
         <div class="d-flex align-items-start" style="gap:16px;">
-          <div class="feature-icon flex-shrink-0" style="background:#0f172a;color:#fff;width:48px;height:48px;font-size:1.1rem;border-radius:12px;display:flex;align-items:center;justify-content:center;">2</div>
+          <div class="feature-icon flex-shrink-0" style="background:var(--primary);color:var(--primary-ink);width:48px;height:48px;font-size:1.1rem;border-radius:8px;display:flex;align-items:center;justify-content:center;">2</div>
           <div>
             <h5 class="fw-bold mb-1" style="font-size:.97rem;">Add Your Records</h5>
             <p class="text-muted mb-0" style="font-size:.88rem;">Enter your loans, expenses, invoices and warranties. Upload documents directly — PDF, JPG, PNG supported.</p>
@@ -153,7 +153,7 @@ if (isset($_SESSION['loggedin']) && $_SESSION['loggedin'] === true) {
       </div>
       <div class="col-md-4">
         <div class="d-flex align-items-start" style="gap:16px;">
-          <div class="feature-icon flex-shrink-0" style="background:#0f172a;color:#fff;width:48px;height:48px;font-size:1.1rem;border-radius:12px;display:flex;align-items:center;justify-content:center;">3</div>
+          <div class="feature-icon flex-shrink-0" style="background:var(--primary);color:var(--primary-ink);width:48px;height:48px;font-size:1.1rem;border-radius:8px;display:flex;align-items:center;justify-content:center;">3</div>
           <div>
             <h5 class="fw-bold mb-1" style="font-size:.97rem;">Stay Ahead</h5>
             <p class="text-muted mb-0" style="font-size:.88rem;">Check the Upcoming view daily to see what's due this week. Mark payments as paid with one click.</p>
