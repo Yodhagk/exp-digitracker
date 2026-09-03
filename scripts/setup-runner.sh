@@ -5,8 +5,19 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/Yodhagk/exp-digitracker"
-RUNNER_VERSION="2.319.1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_USER="github-runner"
+
+# Resolve the latest runner release. Never pin an old version here: GitHub forces
+# stale runners to self-update, and the runner exits (status 0) to let the service
+# manager restart it — which looks like "jobs stuck queued forever".
+RUNNER_VERSION="${RUNNER_VERSION:-$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest \
+  | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')}"
+if [ -z "$RUNNER_VERSION" ]; then
+  echo "[ERR] Could not resolve the latest runner version."
+  echo "      Set it explicitly and re-run: RUNNER_VERSION=x.y.z sudo -E bash $0"
+  exit 1
+fi
 RUNNER_DIR="/home/${RUNNER_USER}/actions-runner"
 RUNNER_LABEL="digitracker-prod"
 
@@ -77,6 +88,10 @@ echo "[OK] Runner configured with label: $RUNNER_LABEL"
 ./svc.sh install "$RUNNER_USER"
 ./svc.sh start
 echo "[OK] Runner service installed and started"
+
+# 6b. svc.sh generates a unit with no Restart= directive, so the runner stays dead
+#     after a self-update and jobs queue forever. Install the restart drop-in.
+bash "$SCRIPT_DIR/harden-runner.sh" || echo "[WARN] Runner hardening step failed — run harden-runner.sh manually"
 
 # 7. Verify
 sleep 3
