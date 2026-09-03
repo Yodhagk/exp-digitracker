@@ -89,7 +89,8 @@ fi
 for D in \
     "${APP_DIR}/uploads" \
     "${APP_DIR}/uploads/invoices" \
-    "${APP_DIR}/uploads/warranties"; do
+    "${APP_DIR}/uploads/warranties" \
+    "${APP_DIR}/uploads/cards"; do
     mkdir -p "$D"
     chown www-data:www-data "$D"
     chmod 775 "$D"

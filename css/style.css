@@ -469,6 +469,14 @@ a { color: var(--primary); }
 .bg-white { background-color: var(--card-bg-alt) !important; }
 .bg-light:not(.badge) { background-color: var(--card-bg-alt) !important; color: var(--text) !important; }
 .text-dark { color: var(--text) !important; }
+/* Bootstrap's own .text-muted/.text-secondary resolve to a hardcoded dark
+   gray (--bs-secondary-color: rgba(33,37,41,.75) by default) meant for a
+   light background. Used bare (not through one of this app's own classes)
+   in hundreds of places for exactly the "secondary text" role — on the dark
+   theme that renders as near-black-on-near-black. Bootstrap's rule carries
+   !important, so this must too; it wins on source order (this file loads
+   after bootstrap.min.css) since specificity is otherwise equal. */
+.text-muted, .text-secondary, .text-body-secondary { color: var(--text-muted) !important; }
 
 /* ── Action buttons ────────────────────────────────── */
 .btn-action {

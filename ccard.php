@@ -5,6 +5,19 @@ $page_title = 'Credit Cards';
 $uid   = (int)$_SESSION['id'];
 $today = date('Y-m-d');
 
+$card_img_dir = __DIR__ . '/uploads/cards/';
+$card_img_ext = ['jpg', 'jpeg', 'png', 'webp'];
+$card_img_max = 5 * 1024 * 1024; // 5MB
+
+function save_card_image($file, string $dir, array $allowed_ext, int $max_size): ?string {
+    if ($file['error'] !== UPLOAD_ERR_OK || $file['size'] > $max_size) return null;
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if (!in_array($ext, $allowed_ext, true)) return null;
+    if (!is_dir($dir)) mkdir($dir, 0775, true);
+    $fname = uniqid('card_', true) . '.' . $ext;
+    return move_uploaded_file($file['tmp_name'], $dir . $fname) ? $fname : null;
+}
+
 // ── POST handlers ─────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $act = $_POST['action'] ?? '';
@@ -25,22 +38,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status    = $_POST['card_status'] ?? 'active';
         $notes     = trim($_POST['notes'] ?? '');
 
+        $new_image = null;
+        if (!empty($_FILES['card_image']['name'])) {
+            $new_image = save_card_image($_FILES['card_image'], $card_img_dir, $card_img_ext, $card_img_max);
+        }
+
         if ($act === 'add_card') {
             $stmt = mysqli_prepare($conn,
                 'INSERT INTO credit_cards
                  (user_id,card_holder,bank_name,card_name,card_last4,card_network,
                   credit_limit,current_balance,statement_date,payment_due_days,
-                  interest_rate,card_color,status,notes)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-            mysqli_stmt_bind_param($stmt, 'isssssddiiidss',
+                  interest_rate,card_color,card_image,status,notes)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            mysqli_stmt_bind_param($stmt, 'isssssddiidssss',
                 $uid,$holder,$bank,$cname,$last4,$network,
                 $limit,$balance,$stmt_day,$due_days,
-                $rate,$color,$status,$notes);
+                $rate,$color,$new_image,$status,$notes);
             mysqli_stmt_execute($stmt);
             mysqli_stmt_close($stmt);
             $msg = 'success:Card added successfully.';
         } else {
             $cid = (int)($_POST['card_id'] ?? 0);
+
+            $old_image = mysqli_fetch_assoc(mysqli_query($conn,
+                "SELECT card_image FROM credit_cards WHERE id=$cid AND user_id=$uid"))['card_image'] ?? null;
+
+            if (!empty($_POST['remove_image']) && $old_image) {
+                $old_path = $card_img_dir . $old_image;
+                if (is_file($old_path)) @unlink($old_path);
+                $image_to_store = null;
+            } elseif ($new_image) {
+                if ($old_image && is_file($card_img_dir . $old_image)) @unlink($card_img_dir . $old_image);
+                $image_to_store = $new_image;
+            } else {
+                $image_to_store = $old_image;
+            }
+            $image_sql = $image_to_store === null ? 'NULL' : "'".mysqli_real_escape_string($conn, $image_to_store)."'";
+
             mysqli_query($conn,
                 "UPDATE credit_cards SET
                   card_holder='".mysqli_real_escape_string($conn,$holder)."',
@@ -49,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                   card_last4='$last4', card_network='$network',
                   credit_limit=$limit, current_balance=$balance,
                   statement_date=$stmt_day, payment_due_days=$due_days,
-                  interest_rate=$rate, card_color='$color',
+                  interest_rate=$rate, card_color='$color', card_image=$image_sql,
                   status='$status',
                   notes='".mysqli_real_escape_string($conn,$notes)."'
                  WHERE id=$cid AND user_id=$uid");
@@ -59,6 +93,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($act === 'delete_card') {
         $cid = (int)($_POST['card_id'] ?? 0);
+        $img = mysqli_fetch_assoc(mysqli_query($conn,
+            "SELECT card_image FROM credit_cards WHERE id=$cid AND user_id=$uid"))['card_image'] ?? null;
+        if ($img && is_file($card_img_dir . $img)) @unlink($card_img_dir . $img);
         mysqli_query($conn, "DELETE FROM card_bills WHERE card_id=$cid AND user_id=$uid");
         mysqli_query($conn, "DELETE FROM credit_cards WHERE id=$cid AND user_id=$uid");
         $msg = 'success:Card deleted.';
@@ -248,7 +285,10 @@ require_once 'includes/header.php';
         <div class="rounded-3 overflow-hidden" style="box-shadow:0 4px 20px rgba(0,0,0,.15);">
 
           <!-- Visual card face -->
-          <div class="p-3 position-relative" style="background:linear-gradient(135deg,<?= $bg ?> 0%,<?= $bg ?>cc 100%);min-height:160px;">
+          <div class="p-3 position-relative" style="<?= !empty($c['card_image'])
+                ? 'background:linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.55)),url('.htmlspecialchars('uploads/cards/'.$c['card_image']).') center/cover no-repeat;'
+                : 'background:linear-gradient(135deg,'.$bg.' 0%,'.$bg.'cc 100%);'
+          ?>min-height:160px;">
             <!-- Chip + Network -->
             <div class="d-flex justify-content-between align-items-start">
               <div style="width:38px;height:28px;background:linear-gradient(135deg,#e8c96b,#c8a84b);border-radius:4px;display:flex;align-items:center;justify-content:center;">
@@ -431,7 +471,7 @@ require_once 'includes/header.php';
         <h5 class="modal-title"><i class="fas fa-credit-card me-2"></i>Add Credit Card</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-      <form method="POST">
+      <form method="POST" enctype="multipart/form-data">
         <input type="hidden" name="action" value="add_card">
         <div class="modal-body">
           <?= card_form_fields() ?>
@@ -453,7 +493,7 @@ require_once 'includes/header.php';
         <h5 class="modal-title"><i class="fas fa-pen me-2"></i>Edit Credit Card</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-      <form method="POST">
+      <form method="POST" enctype="multipart/form-data">
         <input type="hidden" name="action" value="edit_card">
         <input type="hidden" name="card_id" id="edit_card_id">
         <div class="modal-body">
@@ -619,7 +659,14 @@ function card_form_fields(string $p = ''): string {
                . '<input type="radio" name="card_color" value="'.$clr.'" '.($clr==='#1e3a5f'?'checked':'').' style="display:none;" id="'.$p.'color_'.$clr.'">'
                . '<div class="rounded" style="width:32px;height:32px;background:'.$clr.';border:3px solid transparent;transition:border .15s;" '
                . 'onclick="selectColor(this,\''.$p.'\')"></div></label>';
-    $html .= '</div></div>';
+    $html .= '</div><div class="form-text">Used only when no card photo is uploaded below.</div></div>';
+    // Card photo upload
+    $html .= '<div class="col-md-8"><label class="form-label fw-semibold">Card Photo <span class="text-muted fw-normal">(optional)</span></label>'
+           . '<input type="file" class="form-control" name="card_image" id="'.$p.'card_image" accept="image/png,image/jpeg,image/webp">'
+           . '<div class="form-text">JPG, PNG or WebP, up to 5MB. Shown on the card face instead of the flat color.</div></div>';
+    $html .= '<div class="col-md-4 d-flex align-items-end" id="'.$p.'remove_image_wrap" style="display:none;">'
+           . '<div class="form-check"><input class="form-check-input" type="checkbox" name="remove_image" id="'.$p.'remove_image">'
+           . '<label class="form-check-label" for="'.$p.'remove_image">Remove current photo</label></div></div>';
     $html .= '<div class="col-12"><label class="form-label fw-semibold">Notes</label>'
            . '<textarea class="form-control form-control-sm" name="notes" id="'.$p.'notes" rows="2"></textarea></div>';
     $html .= '</div>';
@@ -647,6 +694,11 @@ function editCard(c) {
   document.getElementById(p+'payment_due_days').value = c.payment_due_days;
   document.getElementById(p+'card_status').value      = c.status;
   document.getElementById(p+'notes').value            = c.notes || '';
+  document.getElementById(p+'card_image').value       = '';
+  const removeWrap = document.getElementById(p+'remove_image_wrap');
+  const removeBox  = document.getElementById(p+'remove_image');
+  removeBox.checked = false;
+  removeWrap.style.display = c.card_image ? 'flex' : 'none';
   // color
   document.querySelectorAll('#editCardModal .color-swatch div').forEach(d => {
     d.style.borderColor = 'transparent';
