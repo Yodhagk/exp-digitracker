@@ -154,6 +154,17 @@ enforces that a private-IP LAN box doesn't satisfy on its own:
   sudo apache2ctl configtest && sudo systemctl reload apache2
   ```
 
+  If the certificate was first issued with the hooks in a temporary location (e.g. a
+  `/tmp` clone), certbot recorded *those* paths and renewal will fail once they're
+  gone. Point the renewal config at the stable copies, then prove it works:
+  ```bash
+  sudo sed -i 's#/tmp/digi/scripts/#/var/app/script/#g' /etc/letsencrypt/renewal/digitracker.duckdns.org.conf
+  sudo certbot renew --dry-run
+  ```
+  Apache's `AH00558: Could not reliably determine the server's fully qualified domain
+  name` notice on every `apache2ctl` call is cosmetic; silence it with a global
+  `ServerName`: `echo "ServerName digitracker.duckdns.org" | sudo tee /etc/apache2/conf-available/servername.conf && sudo a2enconf servername && sudo systemctl reload apache2`.
+
   **Renewal**: certbot's `certbot.timer` re-runs the recorded hook commands
   unattended, as root, with no shell exports. The hooks handle this themselves: when
   `DUCKDNS_TOKEN` isn't in the environment they read it from
