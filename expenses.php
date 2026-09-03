@@ -94,18 +94,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $msg = $_GET['msg'] ?? '';
 
-// Auto-mark: past-due EMIs → paid (they debit automatically); regular expenses → overdue
+// Auto-mark: EMIs from past years are assumed auto-debited → paid automatically.
+// From the current year onward, never silently assume payment was made — flag overdue
+// instead, so the schedule grid asks the user to confirm each due month before it's marked paid.
+$year_start = date('Y') . '-01-01';
 mysqli_query($conn, "UPDATE expenses SET status='paid'
-    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$today'");
+    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$year_start'");
+mysqli_query($conn, "UPDATE expenses SET status='overdue'
+    WHERE user_id=$uid AND auto_generated=1 AND status='pending' AND due_date >= '$year_start' AND due_date < '$today'");
 mysqli_query($conn, "UPDATE expenses SET status='overdue'
     WHERE user_id=$uid AND auto_generated=0 AND status='pending' AND due_date < '$today'");
 
+// ── Year selector ────────────────────────────────────────────
+$year = (int)($_GET['year'] ?? date('Y'));
+if ($year < 1970 || $year > 2200) $year = (int)date('Y');
+
+$years_r   = mysqli_query($conn, "SELECT DISTINCT YEAR(due_date) AS y FROM expenses WHERE user_id=$uid");
+$year_list = array_column(mysqli_fetch_all($years_r, MYSQLI_ASSOC), 'y');
+$year_list[] = (int)date('Y');
+$year_list[] = $year;
+$year_list = array_unique(array_map('intval', $year_list));
+rsort($year_list);
+
+// ── Loan EMI schedule grid (selected year) — one row per loan, one column per month ──
+$emi_r = mysqli_query($conn,
+    "SELECT e.*, COALESCE(l.name, SUBSTRING_INDEX(e.name,' – EMI',1)) AS loan_name
+     FROM expenses e LEFT JOIN loans l ON l.id = e.loan_ref_id
+     WHERE e.user_id=$uid AND e.auto_generated=1 AND YEAR(e.due_date)=$year
+     ORDER BY loan_name, e.due_date");
+$schedule = [];
+foreach (mysqli_fetch_all($emi_r, MYSQLI_ASSOC) as $r) {
+    $key = $r['loan_ref_id'] ? 'loan_' . $r['loan_ref_id'] : 'name_' . $r['loan_name'];
+    if (!isset($schedule[$key])) $schedule[$key] = ['label' => $r['loan_name'], 'months' => []];
+    $schedule[$key]['months'][(int)date('n', strtotime($r['due_date']))] = $r;
+}
+uasort($schedule, fn($a, $b) => strcasecmp($a['label'], $b['label']));
+$months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// ── One-time / non-EMI expenses (selected year) ───────────────
 $filter = $_GET['status'] ?? 'all';
 $where  = $filter !== 'all'
     ? "AND status='" . mysqli_real_escape_string($conn, $filter) . "'"
     : '';
 $result = mysqli_query($conn,
-    "SELECT * FROM expenses WHERE user_id=$uid $where ORDER BY due_date ASC");
+    "SELECT * FROM expenses WHERE user_id=$uid AND auto_generated=0 AND YEAR(due_date)=$year $where ORDER BY due_date ASC");
 $rows = mysqli_fetch_all($result, MYSQLI_ASSOC);
 
 $categories = [
@@ -149,19 +181,91 @@ function exp_pay_badge(string $mode, ?string $last4 = null): string {
 </div>
 <?php endif; ?>
 
+<div class="d-flex gap-2 flex-wrap align-items-center justify-content-between mb-3">
+  <form method="GET" class="d-flex align-items-center gap-2">
+    <label class="form-label mb-0 text-muted" style="font-size:.85rem;white-space:nowrap;">
+      <i class="fas fa-calendar me-1"></i>Year
+    </label>
+    <select name="year" class="form-control form-control-sm" style="width:auto;" onchange="this.form.submit()">
+      <?php foreach ($year_list as $y): ?>
+        <option value="<?= $y ?>" <?= $y === $year ? 'selected' : '' ?>><?= $y ?></option>
+      <?php endforeach; ?>
+    </select>
+    <?php if ($filter !== 'all'): ?><input type="hidden" name="status" value="<?= htmlspecialchars($filter) ?>"><?php endif; ?>
+  </form>
+  <div class="d-flex gap-2 flex-wrap align-items-center">
+    <div class="btn-group btn-group-sm">
+      <?php foreach (['all', 'pending', 'overdue', 'paid'] as $f): ?>
+        <a href="?year=<?= $year ?>&status=<?= $f ?>" class="btn btn-<?= $filter === $f ? 'primary' : 'outline-secondary' ?>"><?= ucfirst($f) ?></a>
+      <?php endforeach; ?>
+    </div>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
+      <i class="fas fa-plus me-1"></i>Add Expense
+    </button>
+  </div>
+</div>
+
+<!-- ── Loan EMI Schedule Grid ───────────────────────────────── -->
+<div class="card mb-3">
+  <div class="card-header">
+    <h6 class="card-title"><i class="fas fa-calendar-check me-2" style="color:#8b5cf6"></i>Loan EMI Schedule — <?= $year ?></h6>
+    <span class="text-muted" style="font-size:.78rem;">
+      <i class="fas fa-circle-check me-1"></i>Click <i class="fas fa-check"></i> on a due month to confirm the payment
+    </span>
+  </div>
+  <div class="card-body p-0">
+    <?php if (empty($schedule)): ?>
+      <div class="text-center py-4 text-muted">No loan EMIs scheduled in <?= $year ?>.</div>
+    <?php else: ?>
+    <div class="table-wrapper">
+      <table class="table schedule-grid mb-0">
+        <thead>
+          <tr>
+            <th>Loan</th>
+            <?php foreach ($months as $m): ?><th class="text-center"><?= $m ?></th><?php endforeach; ?>
+            <th class="text-end">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($schedule as $s): $row_total = 0; ?>
+          <tr>
+            <td class="fw-semibold"><?= htmlspecialchars($s['label']) ?></td>
+            <?php for ($m = 1; $m <= 12; $m++):
+              $cell = $s['months'][$m] ?? null;
+              if ($cell) $row_total += (float)$cell['amount'];
+            ?>
+              <td class="sched-cell <?= $cell ? 'sched-' . $cell['status'] : 'sched-empty' ?>">
+                <?php if ($cell): ?>
+                  <div class="sched-amt">₹<?= number_format((float)$cell['amount'], 0) ?></div>
+                  <?php if ($cell['status'] !== 'paid'): ?>
+                    <form method="POST" class="d-inline"
+                          onsubmit="return confirm('Confirm payment:\n<?= htmlspecialchars(addslashes($s['label']), ENT_QUOTES) ?> — <?= $months[$m - 1] ?> <?= $year ?>\n\nMark this EMI as paid?')">
+                      <input type="hidden" name="action" value="mark_paid">
+                      <input type="hidden" name="id" value="<?= $cell['id'] ?>">
+                      <button type="submit" class="sched-btn pay" title="Confirm payment"><i class="fas fa-check"></i></button>
+                    </form>
+                  <?php else: ?>
+                    <i class="fas fa-circle-check text-success" title="Paid"></i>
+                  <?php endif; ?>
+                <?php else: ?>
+                  <span class="text-muted">—</span>
+                <?php endif; ?>
+              </td>
+            <?php endfor; ?>
+            <td class="text-end fw-bold">₹<?= number_format($row_total, 0) ?></td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+    <?php endif; ?>
+  </div>
+</div>
+
+<!-- ── Other Expenses ───────────────────────────────────────── -->
 <div class="card">
   <div class="card-header">
-    <h6 class="card-title"><i class="fas fa-receipt me-2 text-success"></i>Expenses</h6>
-    <div class="d-flex gap-2 flex-wrap align-items-center">
-      <div class="btn-group btn-group-sm">
-        <?php foreach (['all', 'pending', 'overdue', 'paid'] as $f): ?>
-          <a href="?status=<?= $f ?>" class="btn btn-<?= $filter === $f ? 'primary' : 'outline-secondary' ?>"><?= ucfirst($f) ?></a>
-        <?php endforeach; ?>
-      </div>
-      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
-        <i class="fas fa-plus me-1"></i>Add Expense
-      </button>
-    </div>
+    <h6 class="card-title"><i class="fas fa-receipt me-2 text-success"></i>Other Expenses — <?= $year ?></h6>
   </div>
   <div class="card-body p-0">
     <div class="table-wrapper">
@@ -176,7 +280,7 @@ function exp_pay_badge(string $mode, ?string $last4 = null): string {
           <?php if (empty($rows)): ?>
           <tr>
             <td colspan="9" class="text-center py-4 text-muted">
-              No expenses found. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add one.</a>
+              No expenses found in <?= $year ?>. <a href="#" data-bs-toggle="modal" data-bs-target="#addModal">Add one.</a>
             </td>
           </tr>
           <?php else: foreach ($rows as $i => $e):
@@ -188,11 +292,6 @@ function exp_pay_badge(string $mode, ?string $last4 = null): string {
             <td class="text-muted"><?= $i + 1 ?></td>
             <td class="fw-semibold">
               <?= htmlspecialchars((string)($e['name'] ?? '')) ?>
-              <?php if (!empty($e['auto_generated'])): ?>
-                <span class="badge ms-1" style="font-size:.65rem;background:#6f42c1;color:#fff">
-                  <i class="fas fa-rotate me-1"></i>EMI
-                </span>
-              <?php endif; ?>
               <?php if (!empty($e['notes'])): ?>
                 <div class="text-muted" style="font-size:.78rem;">
                   <?= htmlspecialchars(strlen((string)$e['notes']) > 40

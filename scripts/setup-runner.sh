@@ -34,6 +34,7 @@ github-runner ALL=(ALL) NOPASSWD: /bin/cp, /bin/mkdir, /bin/chown, /bin/chmod, /
 github-runner ALL=(ALL) NOPASSWD: /usr/bin/mysql, /usr/sbin/apache2ctl
 github-runner ALL=(ALL) NOPASSWD: /bin/systemctl reload apache2
 github-runner ALL=(ALL) NOPASSWD: /bin/systemctl restart apache2
+github-runner ALL=(ALL) NOPASSWD: /var/app/script/backup-db.sh, /var/app/script/restore-db.sh
 SUDOERS
 chmod 440 "$SUDOERS_FILE"
 echo "[OK] Sudoers configured: $SUDOERS_FILE"

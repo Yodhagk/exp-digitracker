@@ -19,3 +19,42 @@ Upcoming :
 
 <img width="1879" height="786" alt="image" src="https://github.com/user-attachments/assets/c4aeffac-2239-47b3-8745-e6369a3b0e7b" />
 
+## Database Backup & Restore
+
+Backups are full `mysqldump` snapshots (schema + data), gzip-compressed, written to
+`/var/backups/digitracker/`. `latest.sql.gz` always points at the most recent backup.
+
+**Take a backup manually:**
+```bash
+sudo /var/app/script/backup-db.sh
+```
+
+**Automatic daily backups** — one-time setup on the server:
+```bash
+sudo cp scripts/digitracker-backup.service scripts/digitracker-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now digitracker-backup.timer
+```
+Every deploy (`.github/workflows/deploy.yml`) also takes a backup before running migrations,
+as a safety net.
+
+### Migrating to a new machine
+
+1. Copy the latest backup from the old machine:
+   ```bash
+   scp old-host:/var/backups/digitracker/latest.sql.gz .
+   ```
+2. On the new machine, create the database + app user (idempotent, safe to re-run):
+   ```bash
+   sudo mysql < setup.sql
+   ```
+3. Load the real data from the backup:
+   ```bash
+   scp latest.sql.gz new-host:/tmp/
+   sudo bash scripts/restore-db.sh /tmp/latest.sql.gz --force
+   ```
+   (`restore-db.sh` refuses to overwrite a database that already has users unless `--force`
+   is passed — that guard only matters when restoring onto a machine that already has data.)
+4. Deploy the app files as usual (`scripts/deploy-app.sh`, or push to `main` to trigger CI),
+   then enable the backup timer (above) on the new box.
+

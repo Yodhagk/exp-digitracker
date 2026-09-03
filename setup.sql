@@ -1,8 +1,13 @@
 -- DigiTracker Database Setup
--- Run against your MySQL database: simple-lamp
--- Usage: mysql -u root -p simple-lamp < setup.sql
+-- Creates the database, app user and base schema from scratch.
+-- Usage: sudo mysql < setup.sql   (or: mysql -u root -p < setup.sql)
 
-USE `simple-lamp`;
+CREATE DATABASE IF NOT EXISTS `digitracker` DEFAULT CHARACTER SET utf8mb4;
+CREATE USER IF NOT EXISTS 'digiuser'@'localhost' IDENTIFIED BY 'Digi@2026';
+GRANT ALL PRIVILEGES ON `digitracker`.* TO 'digiuser'@'localhost';
+FLUSH PRIVILEGES;
+
+USE `digitracker`;
 
 -- Users table (keep compatible with existing data)
 CREATE TABLE IF NOT EXISTS `users` (

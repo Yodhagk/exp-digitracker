@@ -198,9 +198,14 @@ $msg = $_GET['msg'] ?? '';
 // Auto-mark overdue loans
 mysqli_query($conn, "UPDATE loans SET status='overdue'
     WHERE user_id=$uid AND status='active' AND due_date < '$today'");
-// Auto-mark past-due EMI expenses as paid (EMIs auto-debit on schedule)
+// EMIs from past years are assumed auto-debited → paid automatically.
+// From the current year onward, never silently assume payment was made — flag overdue
+// instead, so the Expenses schedule grid asks the user to confirm before marking it paid.
+$year_start = date('Y') . '-01-01';
 mysqli_query($conn, "UPDATE expenses SET status='paid'
-    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$today'");
+    WHERE user_id=$uid AND auto_generated=1 AND status IN('pending','overdue') AND due_date < '$year_start'");
+mysqli_query($conn, "UPDATE expenses SET status='overdue'
+    WHERE user_id=$uid AND auto_generated=1 AND status='pending' AND due_date >= '$year_start' AND due_date < '$today'");
 
 // Fetch loans with EMI counts + next pending EMI date
 $filter = $_GET['status'] ?? 'all';
@@ -509,7 +514,7 @@ function tenure_label(?int $months, int $emi_paid = 0, int $emi_total = 0): stri
             <div class="col-md-4">
               <label class="form-label">1st EMI Due Date <small class="text-muted">(auto-filled)</small></label>
               <input type="date" name="due_date" id="add_due" class="form-control" readonly
-                     style="background:#f8f9fa">
+                     style="background:var(--input-bg);color:var(--text-muted);">
             </div>
             <!-- Tenure -->
             <div class="col-12">
@@ -618,7 +623,7 @@ function tenure_label(?int $months, int $emi_paid = 0, int $emi_total = 0): stri
             <div class="col-md-4">
               <label class="form-label">1st EMI Due Date <small class="text-muted">(auto-filled)</small></label>
               <input type="date" name="due_date" id="edit_due" class="form-control" readonly
-                     style="background:#f8f9fa">
+                     style="background:var(--input-bg);color:var(--text-muted);">
             </div>
             <!-- Tenure -->
             <div class="col-md-4">

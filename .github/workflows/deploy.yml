@@ -34,6 +34,9 @@ jobs:
       - name: Deploy PHP app files
         run: bash scripts/deploy-app.sh
 
+      - name: Backup database
+        run: sudo /var/app/script/backup-db.sh
+
       - name: Run pending migrations
         if: ${{ github.event.inputs.run_migrations != 'false' }}
         run: bash scripts/run-migrations.sh
