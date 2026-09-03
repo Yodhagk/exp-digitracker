@@ -387,6 +387,7 @@ a { color: var(--primary); }
 .table td {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
+  background-color: transparent;
   color: var(--text);
   font-weight: 500;
   vertical-align: middle;
