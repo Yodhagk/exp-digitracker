@@ -20,6 +20,15 @@ OPTIONAL=(DB_HOST DB_NAME DB_USER
           GMAIL_CLIENT_ID GMAIL_CLIENT_SECRET GMAIL_REDIRECT_URI
           DUCKDNS_TOKEN DUCKDNS_DOMAIN)
 
+# Report which secrets are configured by NAME only (never values) so the run log
+# itself shows what's set without anyone needing repo-admin access to check.
+present=(); absent=()
+for k in "${REQUIRED[@]}" "${OPTIONAL[@]}"; do
+  if [ -n "${!k:-}" ]; then present+=("$k"); else absent+=("$k"); fi
+done
+echo "[INFO] Secrets configured : ${present[*]:-none}"
+echo "[INFO] Secrets not set    : ${absent[*]:-none}"
+
 missing=()
 for k in "${REQUIRED[@]}"; do [ -n "${!k:-}" ] || missing+=("$k"); done
 if [ ${#missing[@]} -gt 0 ]; then
