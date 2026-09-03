@@ -75,6 +75,65 @@ Do **not** add a systemd `Restart=` directive to the runner service. When the ru
 hits a terminal error it exits on purpose and logs `no retry needed`; restarting it
 in a loop just hides the real problem behind a restart counter.
 
+### Gmail OAuth over HTTPS (DuckDNS + Let's Encrypt)
+
+The Shopping page's Gmail sync needs `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` from a
+Google Cloud OAuth client (Google Cloud console → APIs & Services). Two things Google
+enforces that a private-IP LAN box doesn't satisfy on its own:
+
+- **No bare IP as a redirect URI** — it must be `localhost` or a hostname ending in a
+  public suffix (`.com`, `.org`, ...). Fix: a free [DuckDNS](https://www.duckdns.org)
+  subdomain (e.g. `digitracker.duckdns.org`) pointed at this box's LAN IP, resolved
+  locally via each client's hosts file (or the router's local DNS) — Google only
+  validates the string shape, it never needs to actually reach the address.
+- **HTTPS is mandatory for sensitive scopes** (`gmail.readonly` is one) — plain
+  `http://` redirect URIs are rejected outright. Get a real cert via Let's Encrypt
+  using a DNS-01 challenge against DuckDNS, which needs no port-forwarding since
+  nothing has to reach this box from the internet:
+
+  ```bash
+  sudo apt install certbot
+  sudo a2enmod ssl headers
+
+  export DUCKDNS_TOKEN=<your token from duckdns.org>
+  export DUCKDNS_DOMAIN=digitracker        # subdomain only, no .duckdns.org suffix
+
+  sudo -E certbot certonly --manual --preferred-challenges dns \
+    --manual-auth-hook    "$(pwd)/scripts/duckdns-auth-hook.sh" \
+    --manual-cleanup-hook "$(pwd)/scripts/duckdns-cleanup-hook.sh" \
+    -d digitracker.duckdns.org
+  ```
+
+  Then enable the HTTPS vhost — kept as a *separate* file
+  (`scripts/vhost-ssl.conf`) from the port-80 one, because Apache refuses to start
+  if a loaded vhost points at a cert file that doesn't exist yet, so it must only be
+  installed after certbot succeeds:
+
+  ```bash
+  sudo cp scripts/vhost-ssl.conf /etc/apache2/sites-available/digitracker-ssl.conf
+  sudo a2ensite digitracker-ssl
+  sudo apache2ctl configtest && sudo systemctl reload apache2
+  ```
+
+  **Renewal**: certbot's default `certbot.timer` re-runs using the same recorded
+  hook commands, so leave `scripts/duckdns-auth-hook.sh`/`duckdns-cleanup-hook.sh` in
+  place — but `DUCKDNS_TOKEN`/`DUCKDNS_DOMAIN` were only set in your shell, not saved
+  anywhere the timer's non-interactive renewal can see them. Persist them for
+  renewal via a renewal hook environment file, e.g. add to
+  `/etc/letsencrypt/renewal-hooks/pre/duckdns-env.sh`:
+  ```bash
+  #!/bin/sh
+  export DUCKDNS_TOKEN=<your token>
+  export DUCKDNS_DOMAIN=digitracker
+  ```
+  (`chmod +x` it — certbot sources everything in `renewal-hooks/pre/` before renewing.)
+
+In Google Cloud, set the redirect URI to `https://digitracker.duckdns.org/shopping.php`
+and access the app via that hostname going forward — `GMAIL_REDIRECT_URI` derives
+from the request's `Host` header when the env var itself isn't set (see `config.php`),
+so as long as you consistently browse to that hostname you may not need to set
+`GMAIL_REDIRECT_URI` explicitly at all, only `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`.
+
 ### Migrating to a new machine
 
 1. Copy the latest backup from the old machine:
