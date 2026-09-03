@@ -31,9 +31,25 @@ for f in "$WORKSPACE"/includes/*.php; do
   echo "  copied: includes/$(basename "$f")"
 done
 
+# css/ — every page loads css/style.css, so this must ship with the PHP files
+sudo mkdir -p "$WEBROOT/css"
+for f in "$WORKSPACE"/css/*; do
+  [ -f "$f" ] || continue
+  sudo cp "$f" "$WEBROOT/css/$(basename "$f")"
+  echo "  copied: css/$(basename "$f")"
+done
+
+# Root-level static assets
+for f in mlogo.png; do
+  if [ -f "$WORKSPACE/$f" ]; then
+    sudo cp "$WORKSPACE/$f" "$WEBROOT/$f"
+    echo "  copied: $f"
+  fi
+done
+
 # Fix ownership & permissions
 sudo chown -R www-data:www-data "$WEBROOT"
-sudo find "$WEBROOT" -name "*.php" -exec chmod 644 {} \;
+sudo find "$WEBROOT" \( -name "*.php" -o -name "*.css" -o -name "*.png" \) -exec chmod 644 {} \;
 
 # Sync operational scripts (healthcheck, etc.) to /var/app/script/
 SCRIPT_SRC="$WORKSPACE/scripts"
