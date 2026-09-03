@@ -28,11 +28,18 @@ echo "==> Hardening runner unit: $UNIT"
 DROPIN_DIR="/etc/systemd/system/${UNIT}.d"
 mkdir -p "$DROPIN_DIR"
 cat > "$DROPIN_DIR/restart.conf" <<'CONF'
+[Unit]
+# Bound the retries: a genuinely broken runner (e.g. its registration was deleted
+# by GitHub after a long offline period) must end up in `failed` state where it is
+# visible, not loop forever pretending to recover.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 # The runner process exits 0 after a forced self-update. Without this it would
 # stay dead and queued jobs would never be picked up.
 Restart=always
-RestartSec=5
+RestartSec=10
 CONF
 echo "[OK] Wrote $DROPIN_DIR/restart.conf"
 

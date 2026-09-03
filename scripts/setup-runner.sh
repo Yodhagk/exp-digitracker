@@ -50,11 +50,27 @@ SUDOERS
 chmod 440 "$SUDOERS_FILE"
 echo "[OK] Sudoers configured: $SUDOERS_FILE"
 
+# 2b. Tear down any existing install so this script is safe to re-run.
+#     A stale runner that GitHub forces to self-update will crash-loop instead of
+#     accepting jobs, and the only reliable cure is a clean re-install.
+EXISTING_UNIT=$(systemctl list-units --type=service --all --plain --no-legend 'actions.runner.*' \
+                | awk '{print $1}' | head -1)
+if [ -n "$EXISTING_UNIT" ]; then
+  echo "[..] Removing existing runner service: $EXISTING_UNIT"
+  systemctl stop "$EXISTING_UNIT" 2>/dev/null || true
+  systemctl reset-failed "$EXISTING_UNIT" 2>/dev/null || true
+  if [ -x "${RUNNER_DIR}/svc.sh" ]; then
+    (cd "$RUNNER_DIR" && ./svc.sh uninstall 2>/dev/null) || true
+  fi
+  echo "[OK] Existing runner service removed"
+fi
+
 # 3. Download runner package
 RUNNER_PKG="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
 RUNNER_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_PKG}"
 
 mkdir -p "$RUNNER_DIR"
+chown "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
 cd "$RUNNER_DIR"
 
 if [ ! -f "$RUNNER_PKG" ]; then
@@ -62,7 +78,7 @@ if [ ! -f "$RUNNER_PKG" ]; then
   sudo -u "$RUNNER_USER" curl -fsSL -o "$RUNNER_PKG" "$RUNNER_URL"
 fi
 sudo -u "$RUNNER_USER" tar xzf "$RUNNER_PKG"
-echo "[OK] Runner extracted to $RUNNER_DIR"
+echo "[OK] Runner v${RUNNER_VERSION} extracted to $RUNNER_DIR"
 
 # 4. Get registration token
 echo ""
@@ -73,13 +89,15 @@ echo "  Copy the token shown under 'Configure' step."
 echo "======================================================="
 read -rp "Paste registration token: " REG_TOKEN
 
-# 5. Configure the runner
+# 5. Configure the runner (--replace takes over an existing registration of the
+#    same name, so re-running this after a crash-looping runner just works)
 sudo -u "$RUNNER_USER" ./config.sh \
   --url "$REPO_URL" \
   --token "$REG_TOKEN" \
   --name "$(hostname)" \
   --labels "$RUNNER_LABEL" \
   --work "_work" \
+  --replace \
   --unattended
 
 echo "[OK] Runner configured with label: $RUNNER_LABEL"
