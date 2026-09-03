@@ -8,16 +8,20 @@ REPO_URL="https://github.com/Yodhagk/exp-digitracker"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_USER="github-runner"
 
-# Resolve the latest runner release. Never pin an old version here: GitHub forces
-# stale runners to self-update, and the runner exits (status 0) to let the service
-# manager restart it — which looks like "jobs stuck queued forever".
-RUNNER_VERSION="${RUNNER_VERSION:-$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest \
-  | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')}"
-if [ -z "$RUNNER_VERSION" ]; then
-  echo "[ERR] Could not resolve the latest runner version."
-  echo "      Set it explicitly and re-run: RUNNER_VERSION=x.y.z sudo -E bash $0"
+# Resolve the latest runner release rather than pinning a version that goes stale.
+# Override with: RUNNER_VERSION=x.y.z sudo -E bash setup-runner.sh
+if [ -z "${RUNNER_VERSION:-}" ]; then
+  RUNNER_VERSION=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest 2>/dev/null \
+    | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"v?([^"]+)".*/\1/' || true)
+fi
+if ! printf '%s' "${RUNNER_VERSION:-}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "[ERR] Could not resolve a valid runner version (got: '${RUNNER_VERSION:-}')."
+  echo "      The GitHub API may be rate limited from this network."
+  echo "      Set it explicitly: RUNNER_VERSION=x.y.z sudo -E bash $0"
+  echo "      Latest version is listed at https://github.com/actions/runner/releases/latest"
   exit 1
 fi
+echo "[OK] Runner version to install: v${RUNNER_VERSION}"
 RUNNER_DIR="/home/${RUNNER_USER}/actions-runner"
 RUNNER_LABEL="digitracker-prod"
 
@@ -73,9 +77,12 @@ mkdir -p "$RUNNER_DIR"
 chown "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR"
 cd "$RUNNER_DIR"
 
-if [ ! -f "$RUNNER_PKG" ]; then
+if [ ! -s "$RUNNER_PKG" ]; then
   echo "[..] Downloading runner v${RUNNER_VERSION} ..."
-  sudo -u "$RUNNER_USER" curl -fsSL -o "$RUNNER_PKG" "$RUNNER_URL"
+  # Download as root (writes reliably regardless of directory ownership), then
+  # hand the tarball to the runner user before extracting.
+  curl -fL --retry 3 --retry-delay 2 -o "${RUNNER_DIR}/${RUNNER_PKG}" "$RUNNER_URL"
+  chown "$RUNNER_USER:$RUNNER_USER" "${RUNNER_DIR}/${RUNNER_PKG}"
 fi
 sudo -u "$RUNNER_USER" tar xzf "$RUNNER_PKG"
 echo "[OK] Runner v${RUNNER_VERSION} extracted to $RUNNER_DIR"
@@ -107,9 +114,9 @@ echo "[OK] Runner configured with label: $RUNNER_LABEL"
 ./svc.sh start
 echo "[OK] Runner service installed and started"
 
-# 6b. svc.sh generates a unit with no Restart= directive, so the runner stays dead
-#     after a self-update and jobs queue forever. Install the restart drop-in.
-bash "$SCRIPT_DIR/harden-runner.sh" || echo "[WARN] Runner hardening step failed — run harden-runner.sh manually"
+# Note: do NOT add a systemd Restart= directive to this service. The runner exits
+# deliberately ("no retry needed") when its registration is invalid, and restarting
+# it in a loop only hides that. Re-run this script to re-register instead.
 
 # 7. Verify
 sleep 3
