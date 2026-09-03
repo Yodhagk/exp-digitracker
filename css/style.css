@@ -12,7 +12,7 @@
   --sidebar-bg: #050a0d;
   --sidebar-hover: #0d1b20;
   --sidebar-active: #00e6a8;
-  --sidebar-text: #5c7480;
+  --sidebar-text: #8195a3;
   --sidebar-text-active: #eafff6;
 
   --primary: #00c2ff;
@@ -29,8 +29,8 @@
   --card-bg: #0a0f14;
   --card-bg-alt: #0d151b;
   --input-bg: #060b0f;
-  --text: #d9e4ec;
-  --text-muted: #6c8492;
+  --text: #f2f8fc;
+  --text-muted: #93a8b6;
   --border: #182731;
   --border-soft: rgba(0,194,255,.12);
 
@@ -388,6 +388,7 @@ a { color: var(--primary); }
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   color: var(--text);
+  font-weight: 500;
   vertical-align: middle;
 }
 .table tbody tr:last-child td { border-bottom: none; }
@@ -522,13 +523,13 @@ select.form-control option { background: var(--card-bg); color: var(--text); }
 
 /* ── Schedule Grid (Expenses → Loan EMI year view) ─── */
 .schedule-grid { font-size: .82rem; }
-.schedule-grid td.fw-semibold { white-space: nowrap; }
+.schedule-grid td.fw-semibold { white-space: nowrap; color: var(--text); font-weight: 700; }
 .sched-cell {
   text-align: center;
   min-width: 76px;
   padding: 8px 6px !important;
 }
-.sched-amt { font-family: var(--font-mono); font-weight: 600; font-size: .8rem; margin-bottom: 3px; }
+.sched-amt { font-family: var(--font-mono); font-weight: 700; font-size: .85rem; margin-bottom: 3px; color: var(--text); }
 .sched-btn {
   border: none;
   width: 24px; height: 24px;
