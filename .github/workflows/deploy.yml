@@ -80,14 +80,3 @@ jobs:
           echo "HTTP $code"
           [ "$code" -eq 200 ] || [ "$code" -eq 302 ] || { echo "Smoke test FAILED: HTTP $code"; exit 1; }
           echo "Smoke test PASSED"
-
-      # TEMPORARY — diagnosing the shopping.php 500. php_errors.log is 0640
-      # root:www-data, unreadable by the interactive SSH user; sudo cp + chmod
-      # are both already NOPASSWD for this runner, which a bare `sudo cat`
-      # would not be. Remove this step once the log has been read.
-      - name: TEMP - dump php error log
-        run: |
-          sudo cp /var/app/logs/php_errors.log /tmp/php_err_dump.log
-          sudo chmod 644 /tmp/php_err_dump.log
-          echo "=== last 100 lines of php_errors.log ==="
-          tail -100 /tmp/php_err_dump.log
