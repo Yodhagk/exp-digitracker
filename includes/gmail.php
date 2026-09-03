@@ -67,14 +67,20 @@ function gmail_user_info(string $access_token): ?array {
     return _gmail_get(GMAIL_INFO_URL, $access_token);
 }
 
-// ── Search messages ───────────────────────────────────────────────────
-function gmail_search(string $access_token, string $query, int $max = 50): array {
-    $url = GMAIL_API_BASE . '/messages?' . http_build_query([
-        'q'          => $query,
-        'maxResults' => $max,
-    ]);
-    $r = _gmail_get($url, $access_token);
-    return $r['messages'] ?? [];
+// ── Search messages (paginates through Gmail's results, not just page 1) ──
+function gmail_search(string $access_token, string $query, int $max = 500): array {
+    $all = [];
+    $page_token = null;
+    do {
+        $params = ['q' => $query, 'maxResults' => min(100, $max - count($all))];
+        if ($page_token) $params['pageToken'] = $page_token;
+        $url = GMAIL_API_BASE . '/messages?' . http_build_query($params);
+        $r = _gmail_get($url, $access_token);
+        if (!$r) break;
+        $all = array_merge($all, $r['messages'] ?? []);
+        $page_token = $r['nextPageToken'] ?? null;
+    } while ($page_token && count($all) < $max);
+    return $all;
 }
 
 // ── Get single message ────────────────────────────────────────────────
@@ -192,9 +198,9 @@ function gmail_parse_order(array $msg): array {
 }
 
 // ── Build Gmail search query for e-commerce confirmation emails ───────
+// days_back = 0 means "all time" (no lower date bound).
 function gmail_shopping_query(int $days_back = 90): string {
-    $since = date('Y/m/d', strtotime("-{$days_back} days"));
-    return implode(' OR ', [
+    $senders = implode(' OR ', [
         'from:auto-confirm@amazon.in',
         'from:order-update@amazon.in',
         'from:shipment-tracking@amazon.in',
@@ -204,7 +210,9 @@ function gmail_shopping_query(int $days_back = 90): string {
         'from:noreply@zomato.com',
         'from:noreply@nykaa.com',
         'from:orders@meesho.com',
-    ]) . " after:$since subject:(order OR purchase OR confirmed OR dispatched OR delivered)";
+    ]);
+    $date_filter = $days_back > 0 ? ' after:' . date('Y/m/d', strtotime("-{$days_back} days")) : '';
+    return "($senders)$date_filter subject:(order OR purchase OR confirmed OR dispatched OR delivered)";
 }
 
 // ── Internal curl helpers ─────────────────────────────────────────────

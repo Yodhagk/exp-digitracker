@@ -47,9 +47,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$access_token) {
             $msg = 'danger:Gmail not connected or token expired.';
         } else {
-            $days  = max(7, min(365, (int)($_POST['days_back'] ?? 90)));
-            $q     = gmail_shopping_query($days);
-            $msgs  = gmail_search($access_token, $q, 100);
+            // 0 = "all time" (no lower date bound); otherwise clamp to a sane range.
+            $days_raw = (int)($_POST['days_back'] ?? 90);
+            $days = $days_raw === 0 ? 0 : max(7, min(3650, $days_raw));
+            $q    = gmail_shopping_query($days);
+            // Pull every matching message, not just the first page — a mailbox with
+            // years of orders can easily have more than one page of results.
+            set_time_limit(180);
+            $msgs  = gmail_search($access_token, $q, 500);
             $new   = 0; $skip = 0;
             foreach ($msgs as $ref) {
                 $full = gmail_get_message($access_token, $ref['id']);
@@ -73,7 +78,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      (user_id,platform,order_id,product_name,seller,amount,order_date,source,gmail_msg_id)
                      VALUES ($uid,'$pf','$oid','$pn','$sl',$am,'$od','gmail','$mid')");
                 $new++;
-                usleep(100000); // 100ms between API calls to avoid rate limit
             }
             // Update sync timestamp
             mysqli_query($conn,
@@ -241,6 +245,7 @@ require_once 'includes/header.php';
           <option value="90" selected>Last 90 days</option>
           <option value="180">Last 6 months</option>
           <option value="365">Last 1 year</option>
+          <option value="0">All time</option>
         </select>
         <button type="submit" class="btn btn-sm btn-primary">
           <i class="fas fa-sync me-1"></i>Sync Emails
