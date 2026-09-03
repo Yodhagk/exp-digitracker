@@ -7,9 +7,15 @@
 APP_DIR="/var/www/html/digitracker"
 LOG_DIR="/var/app/logs"
 LOG="${LOG_DIR}/service.log"
-DB_NAME="digitracker"
-DB_USER="digiuser"
-DB_PASS="Digi@2026"
+# DB credentials come from /etc/digitracker/digitracker.env (root:www-data 0640,
+# written by the deploy from GitHub Actions secrets). When this runs as a user
+# that can't read it (the CI runner), the DB check degrades to a root-socket
+# check via the runner's NOPASSWD sudo for /usr/bin/mysql.
+ENV_FILE="/etc/digitracker/digitracker.env"
+[ -r "$ENV_FILE" ] && . "$ENV_FILE"
+DB_NAME="${DB_NAME:-digitracker}"
+DB_USER="${DB_USER:-digiuser}"
+DB_PASS="${DB_PASS:-}"
 QUIET=0; DO_LOG=0
 
 for arg in "$@"; do
@@ -61,13 +67,22 @@ else
     fail "HTTP endpoint returned HTTP ${HTTP:-timeout}"
 fi
 
-# DB app-user
-DB_CHECK=$(mysql -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" \
-    -e "SELECT COUNT(*) FROM users;" 2>/dev/null | tail -1 || echo "")
-if [[ -n "$DB_CHECK" && "$DB_CHECK" =~ ^[0-9]+$ ]]; then
-    ok "DB app user (${DB_USER}@${DB_NAME} — ${DB_CHECK} users)"
+# DB — as the app user when its password is readable, otherwise via root socket
+if [[ -n "$DB_PASS" ]]; then
+    DB_CHECK=$(mysql -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" \
+        -e "SELECT COUNT(*) FROM users;" 2>/dev/null | tail -1 || echo "")
+    if [[ -n "$DB_CHECK" && "$DB_CHECK" =~ ^[0-9]+$ ]]; then
+        ok "DB app user (${DB_USER}@${DB_NAME} — ${DB_CHECK} users)"
+    else
+        fail "DB app user ${DB_USER}@${DB_NAME} unreachable"
+    fi
 else
-    fail "DB app user ${DB_USER}@${DB_NAME} unreachable"
+    DB_CHECK=$(sudo -n mysql -sN "$DB_NAME" -e "SELECT COUNT(*) FROM users;" 2>/dev/null || echo "")
+    if [[ -n "$DB_CHECK" && "$DB_CHECK" =~ ^[0-9]+$ ]]; then
+        ok "DB reachable via root socket (${DB_NAME} — ${DB_CHECK} users; app-user creds not readable by $(whoami))"
+    else
+        fail "DB ${DB_NAME} unreachable (and ${ENV_FILE} not readable by $(whoami))"
+    fi
 fi
 
 # DB root ping

@@ -1,9 +1,11 @@
 -- DigiTracker Database Setup
 -- Creates the database, app user and base schema from scratch.
--- Usage: sudo mysql < setup.sql   (or: mysql -u root -p < setup.sql)
+-- The app user's password is NOT stored here (this file is public); substitute
+-- it at run time from the same value you put in the DB_PASS GitHub secret:
+--   sed "s/__DB_PASS__/$DB_PASS/" setup.sql | sudo mysql
 
 CREATE DATABASE IF NOT EXISTS `digitracker` DEFAULT CHARACTER SET utf8mb4;
-CREATE USER IF NOT EXISTS 'digiuser'@'localhost' IDENTIFIED BY 'Digi@2026';
+CREATE USER IF NOT EXISTS 'digiuser'@'localhost' IDENTIFIED BY '__DB_PASS__';
 GRANT ALL PRIVILEGES ON `digitracker`.* TO 'digiuser'@'localhost';
 FLUSH PRIVILEGES;
 

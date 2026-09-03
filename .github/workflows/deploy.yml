@@ -31,6 +31,21 @@ jobs:
           echo "Branch: $GITHUB_REF_NAME"
           echo "Triggered by: $GITHUB_ACTOR"
 
+      # Runs first and fails loudly if a required secret is missing, so a
+      # misconfigured deploy aborts here and never touches the live app.
+      - name: Write runtime secrets
+        env:
+          DB_HOST:             ${{ secrets.DB_HOST }}
+          DB_NAME:             ${{ secrets.DB_NAME }}
+          DB_USER:             ${{ secrets.DB_USER }}
+          DB_PASS:             ${{ secrets.DB_PASS }}
+          GMAIL_CLIENT_ID:     ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REDIRECT_URI:  ${{ secrets.GMAIL_REDIRECT_URI }}
+          DUCKDNS_TOKEN:       ${{ secrets.DUCKDNS_TOKEN }}
+          DUCKDNS_DOMAIN:      ${{ secrets.DUCKDNS_DOMAIN }}
+        run: bash scripts/write-secrets.sh
+
       - name: Deploy PHP app files
         run: bash scripts/deploy-app.sh
 

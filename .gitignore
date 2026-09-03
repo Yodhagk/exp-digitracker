@@ -1,0 +1,14 @@
+# Runtime secrets never live in this repo. On the server they are written to
+# /etc/digitracker/digitracker.env by scripts/write-secrets.sh from GitHub
+# Actions secrets — see README.md → "Secrets & configuration".
+*.env
+!*.env.example
+config.local.php
+secrets.php
+
+# Local junk
+-b
+*.log
+__pycache__/
+.DS_Store
+Thumbs.db

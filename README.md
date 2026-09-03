@@ -19,6 +19,42 @@ Upcoming :
 
 <img width="1879" height="786" alt="image" src="https://github.com/user-attachments/assets/c4aeffac-2239-47b3-8745-e6369a3b0e7b" />
 
+## Secrets & configuration
+
+No credentials live in this repository. Everything sensitive is a **GitHub Actions
+secret** (repo → Settings → Secrets and variables → Actions) that the deploy writes to
+the server as `/etc/digitracker/digitracker.env` (`root:www-data`, mode `0640`, one
+`KEY='value'` per line) via `scripts/write-secrets.sh`. That single file is read by
+`config.php` (PHP, as `www-data`), by `scripts/startup.sh` / `healthcheck.sh` (as
+root), and by the DuckDNS certbot hooks (unattended renewal, as root). A real
+environment variable of the same name overrides the file if both exist.
+
+| Secret | Required | Purpose |
+|---|---|---|
+| `DB_PASS` | **yes** | App DB user's password. The deploy **aborts before touching anything** if this is unset. |
+| `DB_HOST`, `DB_NAME`, `DB_USER` | no | Default to `localhost` / `digitracker` / `digiuser`. |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` | no | Enables Gmail sync on the Shopping page. |
+| `GMAIL_REDIRECT_URI` | no | Only if the auto-derived `https://<Host>/shopping.php` isn't what you registered with Google. |
+| `DUCKDNS_TOKEN`, `DUCKDNS_DOMAIN` | no | Lets certbot renew the HTTPS certificate unattended. |
+
+The CI health check runs as `github-runner`, which can't read the `0640` file; it
+falls back to a root-socket DB check via its `NOPASSWD` sudo for `mysql` and says so
+in its output — that's expected, not a failure.
+
+**Credentials that were previously committed to this public repo are still in its git
+history** (`Digi@2026` for the DB user, the `vboxuser` SSH password, an old root MySQL
+password). Moving them out of the tree does not un-leak them — rotate them. Safe order
+for the DB password, to avoid an outage:
+
+1. Add the GitHub secrets with the **current** password and let one deploy run
+   (the app now reads the file instead of hardcoded values).
+2. On the server: `sudo mysql -e "ALTER USER 'digiuser'@'localhost' IDENTIFIED BY '<new>'; FLUSH PRIVILEGES;"`
+3. Immediately update the `DB_PASS` secret to the new value and re-run the deploy.
+   (The app is down only between steps 2 and 3 — do them back to back.)
+
+Also rotate the `vboxuser` login (`passwd vboxuser`) and, since it was pasted into a
+chat transcript, regenerate the DuckDNS token from its dashboard.
+
 ## Database Backup & Restore
 
 Backups are full `mysqldump` snapshots (schema + data), gzip-compressed, written to
@@ -98,9 +134,12 @@ enforces that a private-IP LAN box doesn't satisfy on its own:
   export DUCKDNS_TOKEN=<your token from duckdns.org>
   export DUCKDNS_DOMAIN=digitracker        # subdomain only, no .duckdns.org suffix
 
+  # Use the copies the deploy syncs to /var/app/script/ (mode 755, survive reboots) —
+  # certbot records these paths and re-runs them on every renewal, so they must not
+  # point into a /tmp clone.
   sudo -E certbot certonly --manual --preferred-challenges dns \
-    --manual-auth-hook    "$(pwd)/scripts/duckdns-auth-hook.sh" \
-    --manual-cleanup-hook "$(pwd)/scripts/duckdns-cleanup-hook.sh" \
+    --manual-auth-hook    /var/app/script/duckdns-auth-hook.sh \
+    --manual-cleanup-hook /var/app/script/duckdns-cleanup-hook.sh \
     -d digitracker.duckdns.org
   ```
 
@@ -115,18 +154,12 @@ enforces that a private-IP LAN box doesn't satisfy on its own:
   sudo apache2ctl configtest && sudo systemctl reload apache2
   ```
 
-  **Renewal**: certbot's default `certbot.timer` re-runs using the same recorded
-  hook commands, so leave `scripts/duckdns-auth-hook.sh`/`duckdns-cleanup-hook.sh` in
-  place — but `DUCKDNS_TOKEN`/`DUCKDNS_DOMAIN` were only set in your shell, not saved
-  anywhere the timer's non-interactive renewal can see them. Persist them for
-  renewal via a renewal hook environment file, e.g. add to
-  `/etc/letsencrypt/renewal-hooks/pre/duckdns-env.sh`:
-  ```bash
-  #!/bin/sh
-  export DUCKDNS_TOKEN=<your token>
-  export DUCKDNS_DOMAIN=digitracker
-  ```
-  (`chmod +x` it — certbot sources everything in `renewal-hooks/pre/` before renewing.)
+  **Renewal**: certbot's `certbot.timer` re-runs the recorded hook commands
+  unattended, as root, with no shell exports. The hooks handle this themselves: when
+  `DUCKDNS_TOKEN` isn't in the environment they read it from
+  `/etc/digitracker/digitracker.env` — so set `DUCKDNS_TOKEN` (and optionally
+  `DUCKDNS_DOMAIN`) as GitHub Actions secrets too, and the deploy keeps that file
+  current. Nothing else to configure.
 
 In Google Cloud, set the redirect URI to `https://digitracker.duckdns.org/shopping.php`
 and access the app via that hostname going forward — `GMAIL_REDIRECT_URI` derives
@@ -140,9 +173,11 @@ so as long as you consistently browse to that hostname you may not need to set
    ```bash
    scp old-host:/var/backups/digitracker/latest.sql.gz .
    ```
-2. On the new machine, create the database + app user (idempotent, safe to re-run):
+2. On the new machine, create the database + app user (idempotent, safe to re-run).
+   `setup.sql` carries a `__DB_PASS__` placeholder rather than the real password —
+   substitute the same value you set as the `DB_PASS` GitHub secret:
    ```bash
-   sudo mysql < setup.sql
+   DB_PASS='<the app DB password>' sh -c 'sed "s/__DB_PASS__/$DB_PASS/" setup.sql | sudo mysql'
    ```
 3. Load the real data from the backup:
    ```bash

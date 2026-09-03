@@ -8,9 +8,14 @@ set -uo pipefail
 LOG_DIR="/var/app/logs"
 LOG="${LOG_DIR}/service.log"
 APP_DIR="/var/www/html/digitracker"
-DB_NAME="digitracker"
-DB_USER="digiuser"
-DB_PASS="Digi@2026"
+
+# DB credentials come from /etc/digitracker/digitracker.env (written by the
+# deploy from GitHub Actions secrets) — never hardcoded here.
+ENV_FILE="/etc/digitracker/digitracker.env"
+[ -r "$ENV_FILE" ] && . "$ENV_FILE"
+DB_NAME="${DB_NAME:-digitracker}"
+DB_USER="${DB_USER:-digiuser}"
+DB_PASS="${DB_PASS:-}"
 
 # ── Bootstrap log directory ────────────────────────────────
 mkdir -p "$LOG_DIR"
@@ -68,12 +73,16 @@ else
 fi
 
 # ── DB app-user connectivity check ────────────────────────
-DB_ROWS=$(mysql -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" \
-    -e "SELECT COUNT(*) FROM users;" 2>/dev/null | tail -1 || echo "")
-if [[ -n "$DB_ROWS" && "$DB_ROWS" =~ ^[0-9]+$ ]]; then
-    log "DB connectivity (${DB_USER}@${DB_NAME}): OK — ${DB_ROWS} user(s)"
+if [[ -z "$DB_PASS" ]]; then
+    log "WARNING: ${ENV_FILE} missing or has no DB_PASS — the app cannot connect until the deploy writes it"
 else
-    log "WARNING: DB app-user check failed — run migrate_v2.sql if new install"
+    DB_ROWS=$(mysql -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" \
+        -e "SELECT COUNT(*) FROM users;" 2>/dev/null | tail -1 || echo "")
+    if [[ -n "$DB_ROWS" && "$DB_ROWS" =~ ^[0-9]+$ ]]; then
+        log "DB connectivity (${DB_USER}@${DB_NAME}): OK — ${DB_ROWS} user(s)"
+    else
+        log "WARNING: DB app-user check failed — run migrate_v2.sql if new install"
+    fi
 fi
 
 # ── Ensure upload directories exist and are writable ──────

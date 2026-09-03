@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Certbot --manual-auth-hook for a DuckDNS DNS-01 challenge.
-# Certbot sets $CERTBOT_VALIDATION; DUCKDNS_TOKEN/DUCKDNS_DOMAIN must be
-# exported in the shell that invokes certbot (see README.md).
+# Certbot sets $CERTBOT_VALIDATION. DUCKDNS_TOKEN/DUCKDNS_DOMAIN come from the
+# environment if set (first issuance), otherwise from the server's secrets file
+# — which is what makes certbot's unattended renewal work, since renewal runs
+# as root from a timer with no shell exports.
 set -euo pipefail
-: "${DUCKDNS_TOKEN:?Set DUCKDNS_TOKEN before running certbot}"
-: "${DUCKDNS_DOMAIN:?Set DUCKDNS_DOMAIN (the subdomain only, e.g. 'digitracker')}"
+ENV_FILE="/etc/digitracker/digitracker.env"
+if [ -z "${DUCKDNS_TOKEN:-}" ] && [ -r "$ENV_FILE" ]; then . "$ENV_FILE"; fi
+: "${DUCKDNS_TOKEN:?DUCKDNS_TOKEN not set and not found in $ENV_FILE}"
+DUCKDNS_DOMAIN="${DUCKDNS_DOMAIN:-digitracker}"
 
 RESP=$(curl -fsS "https://www.duckdns.org/update?domains=${DUCKDNS_DOMAIN}&token=${DUCKDNS_TOKEN}&txt=${CERTBOT_VALIDATION}")
 if [ "$RESP" != "OK" ]; then
