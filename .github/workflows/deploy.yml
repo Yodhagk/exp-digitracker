@@ -46,15 +46,21 @@ jobs:
           DUCKDNS_DOMAIN:      ${{ secrets.DUCKDNS_DOMAIN }}
         run: bash scripts/write-secrets.sh
 
-      - name: Deploy PHP app files
-        run: bash scripts/deploy-app.sh
-
+      # Order matters here: back up before anything changes, then apply schema
+      # migrations BEFORE the new PHP files that assume they already ran (e.g.
+      # login.php querying a users.role column added by migrate_v6.sql). Migrations
+      # only add columns/tables, so the still-live old code never notices them —
+      # deploying the new code first would instead open a window where every
+      # login attempt against the old schema throws.
       - name: Backup database
         run: sudo /var/app/script/backup-db.sh
 
       - name: Run pending migrations
         if: ${{ github.event.inputs.run_migrations != 'false' }}
         run: bash scripts/run-migrations.sh
+
+      - name: Deploy PHP app files
+        run: bash scripts/deploy-app.sh
 
       - name: Reload Apache
         run: sudo systemctl reload apache2

@@ -9,18 +9,13 @@ WORKSPACE="$(pwd)"
 echo "==> Source  : $WORKSPACE"
 echo "==> Target  : $WEBROOT"
 
-# Root PHP pages
-ROOT_FILES=(
-  dashboard.php expenses.php loans.php reports.php
-  invoices.php warranties.php upcoming.php
-  ccard.php shopping.php
-  index.php login.php logout.php register.php config.php
-)
-for f in "${ROOT_FILES[@]}"; do
-  if [ -f "$WORKSPACE/$f" ]; then
-    sudo cp "$WORKSPACE/$f" "$WEBROOT/$f"
-    echo "  copied: $f"
-  fi
+# Root PHP pages — every *.php in the repo root, not a hand-maintained list.
+# (A hardcoded list is exactly how css/ got left undeployed for an entire
+# redesign earlier, and how users.php would have silently never shipped here.)
+for f in "$WORKSPACE"/*.php; do
+  [ -f "$f" ] || continue
+  sudo cp "$f" "$WEBROOT/$(basename "$f")"
+  echo "  copied: $(basename "$f")"
 done
 
 # includes/ directory

@@ -66,6 +66,11 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <li class="<?= $current_page === 'reports.php' ? 'active' : '' ?>">
       <a href="reports.php"><i class="fas fa-chart-bar"></i><span>Reports</span></a>
     </li>
+    <?php if (($_SESSION['role'] ?? 'user') === 'admin'): ?>
+    <li class="<?= $current_page === 'users.php' ? 'active' : '' ?>">
+      <a href="users.php"><i class="fas fa-users-gear"></i><span>Users</span></a>
+    </li>
+    <?php endif; ?>
   </ul>
 </nav>
 

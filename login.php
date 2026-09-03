@@ -8,6 +8,9 @@ require_once 'config.php';
 
 $username = $password = '';
 $login_err = '';
+if (!empty($_GET['msg'])) {
+    [, $login_err] = array_pad(explode(':', $_GET['msg'], 2), 2, '');
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username'] ?? '');
@@ -16,22 +19,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($username) || empty($password)) {
         $login_err = 'Please enter both username and password.';
     } else {
-        $stmt = mysqli_prepare($conn, 'SELECT id, username, password FROM users WHERE username = ?');
+        $stmt = mysqli_prepare($conn, 'SELECT id, username, password, role, status FROM users WHERE username = ?');
         mysqli_stmt_bind_param($stmt, 's', $username);
         mysqli_stmt_execute($stmt);
         mysqli_stmt_store_result($stmt);
 
         if (mysqli_stmt_num_rows($stmt) === 1) {
-            mysqli_stmt_bind_result($stmt, $id, $db_username, $hashed_password);
+            mysqli_stmt_bind_result($stmt, $id, $db_username, $hashed_password, $role, $status);
             mysqli_stmt_fetch($stmt);
-            if (password_verify($password, $hashed_password)) {
+            if (!password_verify($password, $hashed_password)) {
+                $login_err = 'Invalid username or password.';
+            } elseif ($status === 'suspended') {
+                $login_err = 'This account has been suspended. Contact an administrator.';
+            } else {
                 $_SESSION['loggedin'] = true;
                 $_SESSION['id']       = $id;
                 $_SESSION['username'] = $db_username;
+                $_SESSION['role']     = $role;
                 header('Location: dashboard.php');
                 exit;
-            } else {
-                $login_err = 'Invalid username or password.';
             }
         } else {
             $login_err = 'Invalid username or password.';
